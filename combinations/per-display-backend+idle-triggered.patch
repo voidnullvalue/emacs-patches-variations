@@ -1,0 +1,159 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Cross-family composition: ns-color-cache/per-display-backend + malloc-pressure-relief/idle-triggered
+#
+# These two variants are non-conflicting (different files: nsterm.m + alloc.c + keyboard.c)
+# and architecturally complementary: both tie expensive operations to lifecycle events
+# rather than executing them inline on every invocation.
+#
+# - per-display-backend: attaches the NSColor cache to NsDisplayInfo lifetime,
+#   avoiding cache leaks across display connect/disconnect cycles.
+# - idle-triggered: defers malloc_zone_pressure_relief to idle time,
+#   eliminating arena-walk latency from GC pauses.
+#
+# Together they represent a "deferred work, scoped lifetime" design philosophy
+# for the macOS Emacs drawing path.
+#
+# Apply order: nsterm.m patch first, then alloc.c + keyboard.c patches.
+# These patches have no shared context lines and can be applied in any order.
+
+# ============================================================
+# Part 1: ns-color-cache/per-display-backend (src/nsterm.m)
+# ============================================================
+diff --git a/src/nsterm.m b/src/nsterm.m
+index a7f3fc292c..0000000000 100644
+--- a/src/nsterm.m
++++ b/src/nsterm.m
+@@ -151,6 +151,60 @@
+
+ /* ==========================================================================
+
++   NSColor per-display cache (attached to NsDisplayInfo).
++
++   ========================================================================== */
++void
++ns_display_color_cache_init (struct ns_display_info *dpyinfo)
++{
++  dpyinfo->color_cache = [[NSMutableDictionary alloc] init];
++}
++
++void
++ns_display_color_cache_free (struct ns_display_info *dpyinfo)
++{
++  [dpyinfo->color_cache release];
++  dpyinfo->color_cache = nil;
++}
++
++static NSColor *
++ns_display_color_lookup (struct ns_display_info *dpyinfo, unsigned long key)
++{
++  return dpyinfo->color_cache[@((unsigned long) key)];
++}
++
++static void
++ns_display_color_store (struct ns_display_info *dpyinfo,
++                        unsigned long key, NSColor *col)
++{
++  dpyinfo->color_cache[@((unsigned long) key)] = col;
++}
++
++
++/* ==========================================================================
++
+    NSColor, EmacsColor category.
+
+    ========================================================================== */
+@@ -184,12 +248,21 @@
+
+ + (NSColor *)colorWithUnsignedLong:(unsigned long)c
+ {
++  struct ns_display_info *dpyinfo = ns_display_info_for_frame (selected_frame);
++  if (dpyinfo && dpyinfo->color_cache)
++    {
++      NSColor *cached = ns_display_color_lookup (dpyinfo, c);
++      if (cached != nil)
++        return cached;
++    }
++
+   EmacsCGFloat a = (double)((c >> 24) & 0xff) / 255.0;
+   EmacsCGFloat r = (double)((c >> 16) & 0xff) / 255.0;
+   EmacsCGFloat g = (double)((c >> 8) & 0xff) / 255.0;
+   EmacsCGFloat b = (double)(c & 0xff) / 255.0;
+
+-  return [NSColor colorForEmacsRed:r green:g blue:b alpha:a];
++  NSColor *col = [NSColor colorForEmacsRed:r green:g blue:b alpha:a];
++  if (dpyinfo && dpyinfo->color_cache)
++    ns_display_color_store (dpyinfo, c, col);
++  return col;
+ }
+
+# ============================================================
+# Part 2: malloc-pressure-relief/idle-triggered (src/alloc.c)
+# ============================================================
+diff --git a/src/alloc.c b/src/alloc.c
+index 5fc166dbc2..0000000000 100644
+--- a/src/alloc.c
++++ b/src/alloc.c
+@@ -23,6 +23,10 @@
+ # include <malloc.h>
+ #endif
+
++#ifdef HAVE_MALLOC_MALLOC_H
++# include <malloc/malloc.h>
++#endif
++
+@@ -5798,6 +5802,62 @@
+
++#ifdef HAVE_MALLOC_MALLOC_H
++#define IDLE_PRESSURE_FREED_THRESHOLD (4 * 1024 * 1024)
++static bool pressure_relief_pending;
++static uintmax_t idle_pressure_executions;
++static uintmax_t idle_pressure_bytes_returned;
++
++void
++maybe_schedule_idle_pressure_relief (byte_ct freed_bytes)
++{
++  if (pressure_relief_pending)
++    return;
++  if (freed_bytes >= (byte_ct) IDLE_PRESSURE_FREED_THRESHOLD)
++    pressure_relief_pending = true;
++}
++
++bool
++execute_pending_pressure_relief (void)
++{
++  if (!pressure_relief_pending)
++    return false;
++  pressure_relief_pending = false;
++  size_t released = malloc_zone_pressure_relief (NULL, 0);
++  idle_pressure_executions++;
++  idle_pressure_bytes_returned += released;
++  return true;
++}
++#else
++void maybe_schedule_idle_pressure_relief (byte_ct freed_bytes) { (void) freed_bytes; }
++bool execute_pending_pressure_relief (void) { return false; }
++#endif
+
+@@ -6012,8 +6074,15 @@
++  byte_ct freed_bytes = 0;
+   if (tot_before != (byte_ct) -1)
+     {
+       byte_ct tot_after = total_bytes_of_live_objects ();
+       if (tot_after < tot_before)
+-	malloc_probe (min (tot_before - tot_after, SIZE_MAX));
++	{
++	  freed_bytes = tot_before - tot_after;
++	  malloc_probe (min (freed_bytes, SIZE_MAX));
++	}
+     }
++  maybe_schedule_idle_pressure_relief (freed_bytes);
+
+# ============================================================
+# Part 3: malloc-pressure-relief/idle-triggered (src/keyboard.c)
+# ============================================================
+diff --git a/src/keyboard.c b/src/keyboard.c
+index 0000000000..0000000000 100644
+--- a/src/keyboard.c
++++ b/src/keyboard.c
+@@ -XXXX,X +XXXX,X @@ /* In the idle processing section: */
++  execute_pending_pressure_relief ();

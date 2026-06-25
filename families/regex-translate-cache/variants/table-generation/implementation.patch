@@ -1,0 +1,62 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: table-generation — validate cache against translate-table object identity
+# Materially different from baseline: validation uses EQ comparison of the translate
+# table Lisp object, not a boolean flag; table replacement is detected automatically;
+# in-place mutation is not detected (documented limitation).
+diff --git a/src/regex-emacs.c b/src/regex-emacs.c
+index d8ed8a462a..0000000000 100644
+--- a/src/regex-emacs.c
++++ b/src/regex-emacs.c
+@@ -1196,6 +1196,26 @@
+ #define RE_TRANSLATE(TBL, C) char_table_translate (TBL, C)
+ #define TRANSLATE(d) (!NILP (translate) ? RE_TRANSLATE (translate, d) : (d))
+
++/* Translation fast path validated by translate-table object identity.
++
++   The cache is valid when:
++   1. trt_ascii_valid is true (cache was populated), AND
++   2. EQ(bufp->trt_built_for, translate) — the translate table in use
++      is the same object as when the cache was built.
++
++   This detects translate table replacement (assigning a different table
++   object to the search variables) but NOT in-place mutation (modifying
++   the existing table object's char-table entries).  In-place mutation
++   is a known limitation: it requires a generation counter on char-tables.
++
++   When translate is nil, the cache is not used (no translation needed).
++   trt_built_for is set to Qnil when compiled without a translate table.  */
++#define TRANSLATE_TRU(C)						\
++  ((bufp->trt_ascii_valid					 	\
++    && EQ (bufp->trt_built_for, translate)				\
++    && (unsigned) (C) < 128)						\
++   ? (int) bufp->trt_ascii[(unsigned char) (C)]				\
++   : TRANSLATE (C))
++
+
+diff --git a/src/regex-emacs.h b/src/regex-emacs.h
+index bcfff662f7..0000000000 100644
+--- a/src/regex-emacs.h
++++ b/src/regex-emacs.h
+@@ -XXXX,X +XXXX,X @@ struct re_pattern_buffer
+   unsigned char trt_ascii[256];
+-  bool_bf trt_ascii_valid : 1;
++  bool_bf trt_ascii_valid : 1;
++  Lisp_Object trt_built_for;    /* translate table at cache build time; Qnil if none */
+
+@@ -XXXX,X +XXXX,X @@ re_compile_pattern population block:
++  if (!NILP (translate))
++    {
++      for (int i = 0; i < 256; i++)
++        {
++          int t = char_table_translate (translate, i);
++          bufp->trt_ascii[i] = (CHAR_TO_BYTE_SAFE (t) == t)
++                                ? (unsigned char) t : (unsigned char) i;
++        }
++      bufp->trt_ascii_valid = true;
++      bufp->trt_built_for = translate;
++    }
++  else
++    {
++      bufp->trt_ascii_valid = false;
++      bufp->trt_built_for = Qnil;
++    }

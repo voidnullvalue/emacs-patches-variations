@@ -1,0 +1,90 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: packed-entry — syntax and translation packed into one uint16_t per character
+# Materially different from baseline: data representation is packed scalar
+# (5b syntax + 1b syntax_valid + 8b translate + 1b translate_valid + 1b reserved = 16 bits);
+# single array vs two separate arrays; masks and shifts for field access.
+diff --git a/src/regex-emacs.c b/src/regex-emacs.c
+index d8ed8a462a..0000000000 100644
+--- a/src/regex-emacs.c
++++ b/src/regex-emacs.c
+@@ -50,6 +50,66 @@
+ /* Explicit syntax lookup using the buffer-local table.  */
+ #define BUFFER_SYNTAX(c) syntax_property (c, 0)
+
++/* Packed combined cache: one uint16_t per character encodes both syntax
++   and translation data.
++
++   Bit layout (LSB to MSB):
++     bits  0-4  : syntax code (5 bits; enum syntaxcode max value <= 15, fits in 4;
++                  5 bits provides margin for future syntax codes)
++     bit   5    : syntax_valid (1 = syntax field is valid)
++     bits  6-13 : translate value (8 bits; byte range 0-255)
++     bit   14   : translate_valid (1 = translate field is valid)
++     bit   15   : reserved (must be 0)
++
++   Field-width sufficiency:
++   - Syntax: enum syntaxcode in Emacs has ~15 values (Swhitespace..Smax).
++     5 bits covers values 0-31; sufficient with margin.
++   - Translate: byte values 0-255 fit in 8 bits.  Translations outside 0-255
++     cannot be stored and leave translate_valid clear (use slow path).
++
++   A _Static_assert on enum syntaxcode values fitting in 5 bits is recommended.  */
++
++#define RE_PACK_SYNTAX_SHIFT    0
++#define RE_PACK_SYNTAX_MASK     ((1u << 5) - 1)   /* 0x1F */
++#define RE_PACK_SYNTAX_VALID    (1u << 5)          /* 0x20 */
++#define RE_PACK_TRT_SHIFT       6
++#define RE_PACK_TRT_MASK        ((1u << 8) - 1)   /* 0xFF */
++#define RE_PACK_TRT_VALID       (1u << 14)         /* 0x4000 */
+
++#define RE_PACKED_SYNTAX_VALID(e)   ((e) & RE_PACK_SYNTAX_VALID)
++#define RE_PACKED_SYNTAX(e)         (((e) >> RE_PACK_SYNTAX_SHIFT) & RE_PACK_SYNTAX_MASK)
++#define RE_PACKED_TRT_VALID(e)      ((e) & RE_PACK_TRT_VALID)
++#define RE_PACKED_TRT(e)            (((e) >> RE_PACK_TRT_SHIFT) & RE_PACK_TRT_MASK)
+
++#define SYNTAX_TRU(c)								\
++  ((bufp->re_packed_valid && (unsigned) (c) < 128				\
++    && RE_PACKED_SYNTAX_VALID (bufp->re_packed[(unsigned char) (c)]))		\
++   ? (enum syntaxcode) RE_PACKED_SYNTAX (bufp->re_packed[(unsigned char) (c)])	\
++   : SYNTAX (c))
+
++#define TRANSLATE_TRU(C)							\
++  ((bufp->re_packed_valid && (unsigned) (C) < 128				\
++    && RE_PACKED_TRT_VALID (bufp->re_packed[(unsigned char) (C)]))		\
++   ? (int) RE_PACKED_TRT (bufp->re_packed[(unsigned char) (C)])		\
++   : TRANSLATE (C))
++
+
+diff --git a/src/regex-emacs.h b/src/regex-emacs.h
+index bcfff662f7..0000000000 100644
+--- a/src/regex-emacs.h
++++ b/src/regex-emacs.h
+@@ -XXXX,X +XXXX,X @@ struct re_pattern_buffer
+-  unsigned char syntax_ascii[128];
+-  bool_bf syntax_ascii_valid : 1;
+-  unsigned char trt_ascii[256];
+-  bool_bf trt_ascii_valid : 1;
++  uint16_t re_packed[128];      /* packed combined cache; 256 bytes */
++  bool_bf  re_packed_valid : 1;
+
+@@ -XXXX,X +XXXX,X @@ re_compile_pattern population block:
++  memset (bufp->re_packed, 0, sizeof (bufp->re_packed));
++  bufp->re_packed_valid = true;
++
++  if (!parse_sexp_lookup_properties)
++    for (int i = 0; i < 128; i++)
++      {
++        unsigned int syn = (unsigned int) syntax_property (i, 0);
++        if (syn <= RE_PACK_SYNTAX_MASK)   /* fits in 5 bits */
++          bufp->re_packed[i] |= (uint16_t)
++            ((syn << RE_PACK_SYNTAX_SHIFT) | RE_PACK_SYNTAX_VALID);
++      }
++
++  if (!NILP (translate))
++    for (int i = 0; i < 128; i++)
++      {
++        int t = char_table_translate (translate, i);
++        if (CHAR_TO_BYTE_SAFE (t) == t)  /* fits in byte range */
++          bufp->re_packed[i] |= (uint16_t)
++            (((unsigned int)(unsigned char) t << RE_PACK_TRT_SHIFT) | RE_PACK_TRT_VALID);
++      }

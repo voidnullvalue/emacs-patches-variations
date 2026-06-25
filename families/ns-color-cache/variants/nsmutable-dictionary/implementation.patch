@@ -1,0 +1,105 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: NSMutableDictionary-backed cache — uses Foundation collection
+# Materially different from baseline: cache structure is NSMutableDictionary
+# (hash table with NSDictionary ownership semantics) vs flat C array;
+# eviction policy is none (unbounded growth); no hash function written by hand;
+# key type is NSNumber wrapping unsigned long.
+diff --git a/src/nsterm.m b/src/nsterm.m
+index a7f3fc292c..0000000000 100644
+--- a/src/nsterm.m
++++ b/src/nsterm.m
+@@ -151,6 +151,78 @@
+
+ /* ==========================================================================
+
++   NSColor NSMutableDictionary cache.
++
++   ========================================================================== */
++/* Cache of NSColor objects backed by NSMutableDictionary.
++
++   Keys are NSNumber objects wrapping the packed pixel value (unsigned long).
++   Values are NSColor objects; the dictionary retains them for the lifetime
++   of the entry.
++
++   Ownership semantics: NSDictionary copies its keys (NSNumber is immutable,
++   so copy is identical to retain) and retains its values.  The value
++   returned by -objectForKey: is owned by the dictionary; the caller must
++   retain it if they need it beyond the next dictionary mutation.  In
++   practice, +colorWithUnsignedLong: callers use the returned color
++   immediately for drawing and do not need to retain beyond that call.
++
++   Unbounded growth: this design grows without bound as new colors are seen.
++   In a typical Emacs session with a fixed theme the number of distinct
++   colors is small (10–60); the dictionary never grows large.  If Emacs is
++   used for image-editing or similar tasks that produce thousands of distinct
++   colors, the dictionary will grow unboundedly.  Profile before using in
++   memory-constrained environments.
++
++   Autorelease safety: -objectForKey: returns a non-autoreleased object
++   (owned by the dictionary); no autorelease pool flush is required.
++   The @(c) boxed literal creates an NSNumber via the shared-integer pool
++   for small values, or autoreleases for large ones; wrap in an explicit
++   NSAutoreleasePool if used outside a runloop context.
++
++   Thread safety: NSMutableDictionary is not thread-safe.  NS drawing occurs
++   on the main thread; no locking is required.  */
++
++static NSMutableDictionary *ns_color_dict;
++
++static void
++ns_color_dict_init (void)
++{
++  if (!ns_color_dict)
++    ns_color_dict = [[NSMutableDictionary alloc] init];
++}
++
++static void
++ns_color_dict_teardown (void)
++{
++  [ns_color_dict release];
++  ns_color_dict = nil;
++}
++
++static NSColor *
++ns_color_dict_lookup (unsigned long key)
++{
++  return ns_color_dict[@((unsigned long) key)];
++}
++
++static void
++ns_color_dict_store (unsigned long key, NSColor *col)
++{
++  ns_color_dict[@((unsigned long) key)] = col;
++}
++
++
++/* ==========================================================================
++
+    NSColor, EmacsColor category.
+
+    ========================================================================== */
+@@ -184,12 +262,17 @@
+
+ + (NSColor *)colorWithUnsignedLong:(unsigned long)c
+ {
++  NSColor *cached = ns_color_dict_lookup (c);
++  if (cached != nil)
++    return cached;
++
+   EmacsCGFloat a = (double)((c >> 24) & 0xff) / 255.0;
+   EmacsCGFloat r = (double)((c >> 16) & 0xff) / 255.0;
+   EmacsCGFloat g = (double)((c >> 8) & 0xff) / 255.0;
+   EmacsCGFloat b = (double)(c & 0xff) / 255.0;
+
+-  return [NSColor colorForEmacsRed:r green:g blue:b alpha:a];
++  NSColor *col = [NSColor colorForEmacsRed:r green:g blue:b alpha:a];
++  ns_color_dict_store (c, col);
++  return ns_color_dict_lookup (c);
+ }
+
+ - (unsigned long)unsignedLong
+@@ -XXXX,X +XXXX,X @@ ns_initialize_display_info (...)
++  ns_color_dict_init ();
+
+@@ -XXXX,X +XXXX,X @@ ns_term_shutdown (...)
++  ns_color_dict_teardown ();

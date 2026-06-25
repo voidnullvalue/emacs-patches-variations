@@ -1,0 +1,77 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: per-character-struct — one struct per cached character with both subcaches
+# Materially different from baseline: cache structure is array of structs (AoS)
+# rather than two separate arrays (SoA); validity is per-character and per-subcache
+# independently; allows syntax to stay valid while translate is invalidated.
+diff --git a/src/regex-emacs.c b/src/regex-emacs.c
+index d8ed8a462a..0000000000 100644
+--- a/src/regex-emacs.c
++++ b/src/regex-emacs.c
+@@ -50,6 +50,30 @@
+ /* Explicit syntax lookup using the buffer-local table.  */
+ #define BUFFER_SYNTAX(c) syntax_property (c, 0)
+
++/* Combined per-character cache: both syntax and translation in one struct per character.
++
++   Each ReCharEntry has independent syntax_valid and translate_valid bits,
++   allowing the two subcaches to be populated and invalidated independently.
++
++   Memory layout: 128 × 4 bytes = 512 bytes on typical LP64.
++   (unsigned char syntax + unsigned char translate + 2 bool bits, padded to 4 bytes.)
++   A static_assert on sizeof(ReCharEntry) == 4 is recommended.  */
++
++#define SYNTAX_TRU(c)							\
++  ((bufp->re_char_cache_valid && (unsigned) (c) < 128			\
++    && bufp->re_char_cache[(unsigned char) (c)].syntax_valid)		\
++   ? (enum syntaxcode) bufp->re_char_cache[(unsigned char) (c)].syntax	\
++   : SYNTAX (c))
++
++#define TRANSLATE_TRU(C)						\
++  ((bufp->re_char_cache_valid && (unsigned) (C) < 128			\
++    && bufp->re_char_cache[(unsigned char) (C)].translate_valid)	\
++   ? (int) bufp->re_char_cache[(unsigned char) (C)].translate		\
++   : TRANSLATE (C))
++
+ #define RE_MULTIBYTE_P(bufp) ((bufp)->multibyte)
+
+diff --git a/src/regex-emacs.h b/src/regex-emacs.h
+index bcfff662f7..0000000000 100644
+--- a/src/regex-emacs.h
++++ b/src/regex-emacs.h
+@@ -XXXX,X +XXXX,X @@
++typedef struct
++{
++  unsigned char syntax;          /* enum syntaxcode; valid if syntax_valid */
++  unsigned char translate;       /* translated byte value; valid if translate_valid */
++  bool          syntax_valid;    /* true when syntax is populated */
++  bool          translate_valid; /* true when translate is populated */
++} ReCharEntry;
++
+ struct re_pattern_buffer
+ {
+-  unsigned char syntax_ascii[128];
+-  bool_bf syntax_ascii_valid : 1;
+-  unsigned char trt_ascii[256];
+-  bool_bf trt_ascii_valid : 1;
++  ReCharEntry re_char_cache[128];   /* 512 bytes on LP64 */
++  bool_bf     re_char_cache_valid : 1;
+
+@@ -XXXX,X +XXXX,X @@ re_compile_pattern population block:
++  memset (bufp->re_char_cache, 0, sizeof (bufp->re_char_cache));
++  bufp->re_char_cache_valid = true;
++
++  if (!parse_sexp_lookup_properties)
++    for (int i = 0; i < 128; i++)
++      {
++        bufp->re_char_cache[i].syntax = (unsigned char) syntax_property (i, 0);
++        bufp->re_char_cache[i].syntax_valid = true;
++      }
++
++  if (!NILP (translate))
++    for (int i = 0; i < 128; i++)
++      {
++        int t = char_table_translate (translate, i);
++        bufp->re_char_cache[i].translate =
++          (CHAR_TO_BYTE_SAFE (t) == t) ? (unsigned char) t : (unsigned char) i;
++        bufp->re_char_cache[i].translate_valid = true;
++      }

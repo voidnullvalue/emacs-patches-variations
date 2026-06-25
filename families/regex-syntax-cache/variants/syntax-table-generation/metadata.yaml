@@ -1,0 +1,44 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-syntax-cache-syntax-table-generation
+family: regex-syntax-cache
+title: "Regex syntax cache invalidated by syntax-table generation counter"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+  - src/syntax.c
+design_dimensions:
+  invalidation: "generation counter comparison"
+  generation_counter: "current_syntax_table_generation (uint32_t, process-global)"
+  generation_scope: "process-global — any mutation in any buffer increments the counter"
+  mutation_sites: "Fmodify_syntax_entry, Fset_syntax_table, Fcopy_syntax_table"
+  struct_field: "syntax_table_gen_built (uint32_t) replaces bool_bf syntax_ascii_valid"
+  rebuild_trigger: "mismatch detected in SYNTAX_TRU falls through to SYNTAX(c); next re_compile_pattern rebuilds"
+  false_invalidation: "any syntax-table change invalidates all patterns (conservative)"
+dependencies:
+  - "current_syntax_table_generation must be incremented at all syntax-table mutation sites in syntax.c"
+conflicts:
+  - regex-syntax-cache-baseline
+  - regex-syntax-cache-global-epoch
+  - regex-syntax-cache-lazy-no-presexp-guard
+  - regex-syntax-cache-single-byte-256
+  - regex-syntax-cache-sidecar-allocation
+  - regex-syntax-cache-specialized-ascii-matcher
+expected_tradeoffs:
+  benefits:
+    - "Explicit invalidation: syntax mutations trigger cache rebuild without recompile"
+    - "No bool flag needed: generation comparison serves as validity test"
+    - "Works correctly across buffer-local syntax table changes"
+  costs:
+    - "Requires modifying syntax.c to increment counter at mutation sites"
+    - "Process-global scope causes false invalidations on buffer switch with different syntax"
+    - "Counter overflow at UINT32_MAX wraps to 0 and may cause false hits (rare)"
+    - "Must audit all syntax mutation code paths — missing one causes stale cache"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

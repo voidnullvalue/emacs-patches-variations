@@ -1,0 +1,90 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: independently-lazy — populate syntax and translate subcaches on first use
+# Materially different from baseline: population strategy is lazy (first access)
+# rather than eager (compile time); separate built + valid flags per subcache.
+diff --git a/src/regex-emacs.c b/src/regex-emacs.c
+index d8ed8a462a..0000000000 100644
+--- a/src/regex-emacs.c
++++ b/src/regex-emacs.c
+@@ -50,6 +50,60 @@
+ /* Explicit syntax lookup using the buffer-local table.  */
+ #define BUFFER_SYNTAX(c) syntax_property (c, 0)
+
++/* Independently-lazy combined cache.
++
++   Each subcache has two flags:
++   - <name>_built: true after the first call to ensure_<name>_cache; prevents
++     re-entering the population loop on every subsequent miss.
++   - <name>_valid: true when the cache entries are actually usable.
++
++   Patterns that never use word-boundary opcodes never initialize the syntax
++   subcache.  Patterns without a translate table never initialize the translate
++   subcache.  This amortizes population cost across the pattern's use lifetime.
++
++   SYNTAX_TRU calls ensure_syntax_cache on first use (built=false),
++   then uses the fast path for all subsequent calls (built=true, valid=true).
++   If !parse_sexp_lookup_properties → valid=false after build; always slow path.  */
++
++static void
++ensure_syntax_cache (struct re_pattern_buffer *bufp)
++{
++  if (bufp->syntax_ascii_built) return;
++  bufp->syntax_ascii_built = true;
++  if (parse_sexp_lookup_properties)
++    { bufp->syntax_ascii_valid = false; return; }
++  for (int i = 0; i < 128; i++)
++    bufp->syntax_ascii[i] = (unsigned char) syntax_property (i, 0);
++  bufp->syntax_ascii_valid = true;
++}
++
++static void
++ensure_translate_cache (struct re_pattern_buffer *bufp)
++{
++  if (bufp->trt_ascii_built) return;
++  bufp->trt_ascii_built = true;
++  if (NILP (bufp->translate_ref))
++    { bufp->trt_ascii_valid = false; return; }
++  for (int i = 0; i < 128; i++)
++    {
++      int t = char_table_translate (bufp->translate_ref, i);
++      bufp->trt_ascii[i] = (CHAR_TO_BYTE_SAFE (t) == t)
++                           ? (unsigned char) t : (unsigned char) i;
++    }
++  bufp->trt_ascii_valid = true;
++}
++
++#define SYNTAX_TRU(c)						\
++  (ensure_syntax_cache (bufp),					\
++   (bufp->syntax_ascii_valid && (unsigned) (c) < 128)		\
++   ? (enum syntaxcode) bufp->syntax_ascii[(unsigned char) (c)]	\
++   : SYNTAX (c))
++
++#define TRANSLATE_TRU(C)					\
++  (ensure_translate_cache (bufp),				\
++   (bufp->trt_ascii_valid && (unsigned) (C) < 128)		\
++   ? (int) bufp->trt_ascii[(unsigned char) (C)]			\
++   : TRANSLATE (C))
++
+
+diff --git a/src/regex-emacs.h b/src/regex-emacs.h
+index bcfff662f7..0000000000 100644
+--- a/src/regex-emacs.h
++++ b/src/regex-emacs.h
+@@ -XXXX,X +XXXX,X @@ struct re_pattern_buffer
+   unsigned char syntax_ascii[128];
+-  bool_bf syntax_ascii_valid : 1;
++  bool_bf syntax_ascii_valid : 1;   /* true = populated and usable */
++  bool_bf syntax_ascii_built : 1;   /* true = populate has run (may still be invalid) */
++
+   unsigned char trt_ascii[128];
+-  bool_bf trt_ascii_valid : 1;
++  bool_bf trt_ascii_valid : 1;
++  bool_bf trt_ascii_built : 1;
++  Lisp_Object translate_ref;        /* translate table at compile time; Qnil if none */
+
+@@ -XXXX,X +XXXX,X @@ re_compile_pattern: reset flags for lazy init (don't populate eagerly):
++  bufp->syntax_ascii_built = false;
++  bufp->syntax_ascii_valid = false;
++  bufp->trt_ascii_built = false;
++  bufp->trt_ascii_valid = false;
++  bufp->translate_ref = translate;   /* save for lazy translate population */

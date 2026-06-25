@@ -1,0 +1,40 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-translate-cache-ascii-128
+family: regex-translate-cache
+title: "Regex translate cache restricted to ASCII range 0-127 (saves 128 bytes)"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+design_dimensions:
+  coverage: "0-127 (ASCII only)"
+  cache_size_bytes: 128
+  vs_baseline: "baseline covers 0-255 (256 bytes); this saves 128 bytes at cost of coverage"
+  fallback: "TRANSLATE(C) for all C >= 128"
+  identity_handling: "identity translations stored as-is (c → c)"
+  non_identity_handling: "stored as (unsigned char)t where t is the translated value"
+dependencies: []
+conflicts:
+  - regex-translate-cache-baseline
+  - regex-translate-cache-lazy-bitmap
+  - regex-translate-cache-wide-entry
+  - regex-translate-cache-sidecar-allocation
+  - regex-translate-cache-identity-sentinel
+  - regex-translate-cache-table-generation
+expected_tradeoffs:
+  benefits:
+    - "128 fewer bytes in re_pattern_buffer per compiled pattern"
+    - "128 fewer char_table_translate() calls at compile time"
+    - "Sufficient for pure ASCII case-folded searches (overwhelmingly common)"
+  costs:
+    - "Codes 128-255 always use slow path (char_table_translate)"
+    - "Latin-1 and other 8-bit case-folding does not benefit from cache"
+    - "Slightly weaker guarantee than baseline for unibyte buffers"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

@@ -1,0 +1,96 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: single-entry hot cache — cache exactly one NSColor by its packed value
+# Materially different from baseline: cache size is 1 (vs 32768); eviction policy
+# is unconditional replacement on miss (vs never-evict); includes explicit teardown
+# to release the retained object; no hash function needed.
+diff --git a/src/nsterm.m b/src/nsterm.m
+index a7f3fc292c..0000000000 100644
+--- a/src/nsterm.m
++++ b/src/nsterm.m
+@@ -151,6 +151,75 @@
+
+ /* ==========================================================================
+
++   NSColor single-entry hot cache.
++
++   ========================================================================== */
++/* Cache of exactly one NSColor object, keyed by its packed pixel value.
++
++   A single-entry "hot cache" exploits temporal locality: if the same color
++   appears in consecutive glyph draw calls (e.g., a long run of text in one
++   face color), the hit rate approaches 100%.  Under workloads that alternate
++   between two or more colors without repetition the hit rate drops toward 0%
++   and every call pays one additional comparison.
++
++   This design occupies the minimum possible memory (one pointer, one key,
++   one validity flag) and requires explicit teardown to release the retained
++   object.  It is the correct choice when:
++   - Memory budget is extremely tight, or
++   - Profile data shows that consecutive same-color draws dominate the workload.
++
++   Thread safety: NS drawing always occurs on the main thread.  No locking
++   is required.  */
++
++static NSColor      *ns_hot_color;
++static unsigned long ns_hot_key;
++static bool          ns_hot_valid;
++
++static NSColor *
++ns_hot_cache_lookup (unsigned long key)
++{
++  if (ns_hot_valid && ns_hot_key == key)
++    return ns_hot_color;
++  return nil;
++}
++
++static NSColor *
++ns_hot_cache_store (unsigned long key, NSColor *col)
++{
++  if (ns_hot_valid)
++    [ns_hot_color release];
++  ns_hot_color = [col retain];
++  ns_hot_key   = key;
++  ns_hot_valid = true;
++  return ns_hot_color;
++}
++
++/* Release the cached object.  Call from ns_term_shutdown or the NS terminal
++   dealloc path so the retained NSColor is not reported as a leak.  */
++void
++ns_hot_cache_teardown (void)
++{
++  if (ns_hot_valid)
++    {
++      [ns_hot_color release];
++      ns_hot_color = nil;
++      ns_hot_valid = false;
++    }
++}
++
++
++/* ==========================================================================
++
+    NSColor, EmacsColor category.
+
+    ========================================================================== */
+@@ -184,12 +259,17 @@
+
+ + (NSColor *)colorWithUnsignedLong:(unsigned long)c
+ {
++  NSColor *cached = ns_hot_cache_lookup (c);
++  if (cached != nil)
++    return cached;
++
+   EmacsCGFloat a = (double)((c >> 24) & 0xff) / 255.0;
+   EmacsCGFloat r = (double)((c >> 16) & 0xff) / 255.0;
+   EmacsCGFloat g = (double)((c >> 8) & 0xff) / 255.0;
+   EmacsCGFloat b = (double)(c & 0xff) / 255.0;
+
+-  return [NSColor colorForEmacsRed:r green:g blue:b alpha:a];
++  NSColor *col = [NSColor colorForEmacsRed:r green:g blue:b alpha:a];
++  return ns_hot_cache_store (c, col);
+ }
+
+ - (unsigned long)unsignedLong
+@@ -XXXX,X +XXXX,X @@ ns_term_shutdown (struct terminal *terminal)
++  ns_hot_cache_teardown ();

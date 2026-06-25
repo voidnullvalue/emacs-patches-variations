@@ -1,0 +1,44 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: malloc-pressure-relief-manual-lisp-primitive
+family: malloc-pressure-relief
+title: "Malloc-zone pressure relief as user-callable Lisp primitive"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/alloc.c: 5fc166dbc2"
+files_modified:
+  - src/alloc.c
+design_dimensions:
+  trigger_policy: "manual — user-callable Lisp primitive; no automatic invocation"
+  timing: "synchronous when called by user or Lisp program"
+  return_value: "bytes released as Lisp integer (clamped to intmax_t)"
+  availability_guard: "HAVE_MALLOC_MALLOC_H; returns nil on non-macOS"
+  api_used: "malloc_zone_pressure_relief (NULL, 0) — public API since macOS 10.7"
+  integration_point: "syms_of_alloc (defsubr registration)"
+  automatic_invocation: false
+dependencies: []
+conflicts:
+  - malloc-pressure-relief-baseline
+  - malloc-pressure-relief-background-dispatch
+  - malloc-pressure-relief-adaptive-threshold
+  - malloc-pressure-relief-idle-triggered
+  - malloc-pressure-relief-every-gc-control
+  - malloc-pressure-relief-freed-byte-goal
+  - malloc-pressure-relief-effectiveness-backoff
+expected_tradeoffs:
+  benefits:
+    - "Zero automatic overhead: no impact on GC latency or frequency"
+    - "User controls when compaction runs (can hook to post-gc-hook if desired)"
+    - "Lisp-accessible: scriptable and inspectable from Emacs Lisp"
+    - "Returns bytes released for diagnostic use"
+    - "Non-macOS builds return nil without compile-time guard in Lisp"
+  costs:
+    - "No automatic benefit: requires user or hook to invoke"
+    - "If never called, provides no improvement to RSS"
+    - "Synchronous: if called from post-gc-hook, blocks the current call"
+    - "Focused tests needed for return-value conversion and non-macOS nil return"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

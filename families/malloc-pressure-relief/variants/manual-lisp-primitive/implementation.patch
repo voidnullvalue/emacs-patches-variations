@@ -1,0 +1,80 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: manual Lisp primitive — expose malloc_zone_pressure_relief as defun
+# Materially different from baseline: no automatic invocation; user-callable;
+# returns bytes released as a Lisp integer; integration point is syms_of_alloc
+# not garbage_collect.
+diff --git a/src/alloc.c b/src/alloc.c
+index 5fc166dbc2..0000000000 100644
+--- a/src/alloc.c
++++ b/src/alloc.c
+@@ -23,6 +23,10 @@
+ # include <malloc.h>
+ #endif
+
++#ifdef HAVE_MALLOC_MALLOC_H
++# include <malloc/malloc.h>
++#endif
++
+ #include <errno.h>
+ #include <stdint.h>
+ #include <stdlib.h>
+@@ -5798,6 +5802,56 @@
+   return Qnil;
+ }
+
++/* Manual malloc-zone pressure relief — Lisp-callable primitive.
++
++   Expose malloc_zone_pressure_relief() as a Lisp function so users and
++   Lisp programs can request memory compaction explicitly, without any
++   automatic invocation after GC.  This is the minimal integration: the
++   C function exists and is accessible, but Emacs itself never calls it.
++
++   The user or a Lisp program decides when to call it, e.g.:
++     (add-hook 'post-gc-hook #'malloc-zone-pressure-relief)
++   or simply:
++     M-: (malloc-zone-pressure-relief) RET
++
++   Return value: the number of bytes the allocator reports as released.
++   This is a best-effort, advisory figure; the actual RSS reduction may
++   differ.  The value is returned as a non-negative Lisp integer.  */
++
++#ifdef HAVE_MALLOC_MALLOC_H
++DEFUN ("malloc-zone-pressure-relief", Fmalloc_zone_pressure_relief,
++       Smalloc_zone_pressure_relief, 0, 0, 0,
++       doc: /* Request that macOS malloc zones release fully-free pages.
++Calls `malloc_zone_pressure_relief (NULL, 0)', which asks the system
++allocator to munmap pages that are entirely free.  Returns the number
++of bytes reported as released (a non-negative integer).  This is a
++best-effort operation; the allocator may release more or less.
++
++This function uses the public `malloc_zone_pressure_relief' API
++(available since macOS 10.7) and does not invoke any undocumented
++Apple APIs.
++
++On platforms other than macOS this function returns nil.  */)
++  (void)
++{
++  size_t released = malloc_zone_pressure_relief (NULL, 0);
++  /* Clamp to intmax_t range; in practice released << INTMAX_MAX.  */
++  intmax_t result = (released <= (size_t) INTMAX_MAX)
++                    ? (intmax_t) released : INTMAX_MAX;
++  return make_int (result);
++}
++#else
++DEFUN ("malloc-zone-pressure-relief", Fmalloc_zone_pressure_relief,
++       Smalloc_zone_pressure_relief, 0, 0, 0,
++       doc: /* Not available on this platform.
++Returns nil on non-macOS builds.  */)
++  (void)
++{
++  return Qnil;
++}
++#endif /* HAVE_MALLOC_MALLOC_H */
++
+
+ /* It may be time to collect garbage.  */
+@@ -6200,6 +6254,10 @@
+   defsubr (&Sgarbage_collect_maybe);
+   defsubr (&Smemory_info);
+   defsubr (&Smemory_use_counts);
++  defsubr (&Smalloc_zone_pressure_relief);

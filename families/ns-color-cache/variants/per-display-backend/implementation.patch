@@ -1,0 +1,102 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: per-display-backend cache — attach color cache to NsDisplayInfo
+# Materially different from baseline: cache scope is per-NS-display (not process-global);
+# lifetime is tied to NsDisplayInfo creation/teardown (not process lifetime);
+# avoids leaking cache state between display/backend instances on multi-display setups.
+diff --git a/src/nsterm.m b/src/nsterm.m
+index a7f3fc292c..0000000000 100644
+--- a/src/nsterm.m
++++ b/src/nsterm.m
+@@ -151,6 +151,60 @@
+
+ /* ==========================================================================
+
++   NSColor per-display cache (attached to NsDisplayInfo).
++
++   ========================================================================== */
++/* Cache NSColor objects keyed by packed pixel in the NsDisplayInfo that
++   owns the display connection.
++
++   Motivation: the baseline's global static table accumulates NSColor objects
++   across all displays and persists after a display is disconnected.  Attaching
++   the cache to NsDisplayInfo ensures that cached colors are released when the
++   backend for that display is torn down, and that different display backends
++   do not share cached colors (relevant when displays have different colorspaces).
++
++   Owning structure: NsDisplayInfo (struct ns_display_info in nsterm.h).
++   Add a field: NSMutableDictionary *color_cache;
++
++   Initialization: ns_initialize_display_info allocates the dictionary.
++   Teardown: ns_term_shutdown (or the display teardown path) releases it.
++
++   This design is different from the per-frame variant (which attaches cache
++   to EmacsView/NSFrame): NsDisplayInfo represents the connection to a display
++   server/output device, not to a window.  Multiple frames may share one
++   NsDisplayInfo.  A per-display cache is shared across frames on the same
++   display but isolated between displays.  */
++
++/* Called from ns_initialize_display_info to set up the color cache.  */
++void
++ns_display_color_cache_init (struct ns_display_info *dpyinfo)
++{
++  dpyinfo->color_cache = [[NSMutableDictionary alloc] init];
++}
++
++/* Called from the display teardown path.  */
++void
++ns_display_color_cache_free (struct ns_display_info *dpyinfo)
++{
++  [dpyinfo->color_cache release];
++  dpyinfo->color_cache = nil;
++}
++
++static NSColor *
++ns_display_color_lookup (struct ns_display_info *dpyinfo, unsigned long key)
++{
++  return dpyinfo->color_cache[@((unsigned long) key)];
++}
++
++static void
++ns_display_color_store (struct ns_display_info *dpyinfo,
++                        unsigned long key, NSColor *col)
++{
++  dpyinfo->color_cache[@((unsigned long) key)] = col;
++}
++
++
++/* ==========================================================================
++
+    NSColor, EmacsColor category.
+
+    ========================================================================== */
+@@ -184,12 +248,21 @@
+
+ + (NSColor *)colorWithUnsignedLong:(unsigned long)c
+ {
++  /* Obtain the display info for the current NS display.  */
++  struct ns_display_info *dpyinfo = ns_display_info_for_frame (selected_frame);
++  if (dpyinfo && dpyinfo->color_cache)
++    {
++      NSColor *cached = ns_display_color_lookup (dpyinfo, c);
++      if (cached != nil)
++        return cached;
++    }
++
+   EmacsCGFloat a = (double)((c >> 24) & 0xff) / 255.0;
+   EmacsCGFloat r = (double)((c >> 16) & 0xff) / 255.0;
+   EmacsCGFloat g = (double)((c >> 8) & 0xff) / 255.0;
+   EmacsCGFloat b = (double)(c & 0xff) / 255.0;
+
+-  return [NSColor colorForEmacsRed:r green:g blue:b alpha:a];
++  NSColor *col = [NSColor colorForEmacsRed:r green:g blue:b alpha:a];
++  if (dpyinfo && dpyinfo->color_cache)
++    ns_display_color_store (dpyinfo, c, col);
++  return col;
+ }
+
+ - (unsigned long)unsignedLong
+@@ -XXXX,X +XXXX,X @@ ns_initialize_display_info (struct ns_display_info *dpyinfo, ...)
++  ns_display_color_cache_init (dpyinfo);
+
+@@ -XXXX,X +XXXX,X @@ ns_term_shutdown (struct terminal *terminal)
++  ns_display_color_cache_free (dpyinfo);

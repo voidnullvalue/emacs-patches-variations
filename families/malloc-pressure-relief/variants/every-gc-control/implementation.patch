@@ -1,0 +1,90 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: every-gc-control — call pressure relief after every GC unconditionally
+# Materially different from baseline: trigger policy is unconditional (vs threshold+periodic);
+# no rate limiting; intended as a benchmark reference/control, not production design.
+diff --git a/src/alloc.c b/src/alloc.c
+index 5fc166dbc2..0000000000 100644
+--- a/src/alloc.c
++++ b/src/alloc.c
+@@ -23,6 +23,10 @@
+ # include <malloc.h>
+ #endif
+
++#ifdef HAVE_MALLOC_MALLOC_H
++# include <malloc/malloc.h>
++#endif
++
+ #include <errno.h>
+ #include <stdint.h>
+ #include <stdlib.h>
+@@ -5798,6 +5802,60 @@
+   return Qnil;
+ }
+
++/* Every-GC compaction control variant.
++
++   This variant invokes malloc_zone_pressure_relief(NULL, 0) after every
++   completed GC with no threshold, no rate limiting, and no backoff.
++
++   PURPOSE: This is a benchmark control/reference design, not a production
++   recommendation.  Its purpose is to establish the upper bound on compaction
++   benefit (maximum possible RSS reduction) and the lower bound on GC throughput
++   (maximum possible latency overhead).  Use it to answer the question:
++   "What is the best case for compaction, and what does it cost?"
++
++   DO NOT deploy this variant without benchmark evidence that the latency cost
++   is acceptable for your workload.  On GC-heavy workloads or small-heap builds,
++   calling the arena walk after every GC may add 10-100 ms of cumulative overhead
++   per session.
++
++   COUNTERS: invocation count, total bytes returned, and cumulative latency
++   in microseconds are tracked in file-static variables.  These can be read
++   from a debugger or exposed as DEFVAR_INT variables for diagnostic purposes.  */
++
++#ifdef HAVE_MALLOC_MALLOC_H
++
++static uintmax_t everygc_compact_count;
++static uintmax_t everygc_bytes_returned;
++static uintmax_t everygc_latency_us;  /* cumulative microseconds */
++
++static void
++compact_after_every_gc (void)
++{
++  struct timespec t0 = current_timespec ();
++  size_t released = malloc_zone_pressure_relief (NULL, 0);
++  struct timespec t1 = current_timespec ();
+
++  everygc_compact_count++;
++  everygc_bytes_returned += released;
++
++  /* Accumulate latency in microseconds.  tv_nsec / 1000 truncates toward
++     zero; acceptable for a latency counter, not for timing correctness.  */
++  struct timespec dt = timespec_sub (t1, t0);
++  uintmax_t us = (uintmax_t) dt.tv_sec * 1000000ULL
++                 + (uintmax_t) (dt.tv_nsec / 1000);
++  /* Guard against overflow on extremely long-running sessions.  */
++  if (everygc_latency_us <= UINTMAX_MAX - us)
++    everygc_latency_us += us;
++  else
++    everygc_latency_us = UINTMAX_MAX;
++}
+
++#endif /* HAVE_MALLOC_MALLOC_H */
+
+ /* It may be time to collect garbage.  */
+@@ -6012,8 +6072,17 @@
+   gcs_done++;
+
+   /* Collect profiling data.  */
+   if (tot_before != (byte_ct) -1)
+     {
+       byte_ct tot_after = total_bytes_of_live_objects ();
+       if (tot_after < tot_before)
+ 	malloc_probe (min (tot_before - tot_after, SIZE_MAX));
+     }
+
++  /* Control variant: compact after every GC.
++     Remove or gate this call for non-benchmark builds.  */
++#ifdef HAVE_MALLOC_MALLOC_H
++  compact_after_every_gc ();
++#endif

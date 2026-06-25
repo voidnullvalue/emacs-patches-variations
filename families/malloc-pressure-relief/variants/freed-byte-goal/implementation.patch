@@ -1,0 +1,118 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: freed-byte-goal — pass GC freed bytes as pressure-relief goal argument
+# Materially different from baseline: non-zero goal passed to malloc_zone_pressure_relief
+# instead of always passing 0 (maximal); allows allocator to terminate walk early
+# once the target is met; safe integer conversion of byte_ct to size_t.
+diff --git a/src/alloc.c b/src/alloc.c
+index 5fc166dbc2..0000000000 100644
+--- a/src/alloc.c
++++ b/src/alloc.c
+@@ -23,6 +23,10 @@
+ # include <malloc.h>
+ #endif
+
++#ifdef HAVE_MALLOC_MALLOC_H
++# include <malloc/malloc.h>
++#endif
++
+ #include <errno.h>
+ #include <stdint.h>
+ #include <stdlib.h>
+@@ -5798,6 +5802,92 @@
+   return Qnil;
+ }
+
++/* Freed-byte-goal compaction variant.
++
++   The baseline always passes goal=0 (maximal release) to
++   malloc_zone_pressure_relief.  This variant passes the number of bytes
++   freed by the just-completed GC as the goal.
++
++   Semantic difference from goal=0:
++   - goal=0: ask the allocator to release as much as possible.  The allocator
++     walks the entire arena until no more fully-free pages remain.
++   - goal=N: ask the allocator to release at least N bytes.  The allocator
++     may terminate the arena walk early once the target is met, potentially
++     reducing walk latency on large heaps with many free pages.
++   The allocator is free to release more than N bytes in either case.
++
++   In practice, the allocator documentation does not guarantee early
++   termination for non-zero goals; this is an optimization hint, not a
++   contract.  Benchmark against goal=0 before relying on latency reduction.
++
++   Integer conversion: byte_ct (alias for uintmax_t) is converted to size_t
++   with explicit clamping at SIZE_MAX to prevent truncation on platforms
++   where size_t < uintmax_t.  Zero freed_bytes means "GC freed nothing
++   useful" — in that case we skip compaction entirely (see below).  */
++
++#ifdef HAVE_MALLOC_MALLOC_H
+
++#define FREED_GOAL_FREED_THRESHOLD (4 * 1024 * 1024)
++#define FREED_GOAL_EVERY_N_GCS     64
++#define FREED_GOAL_MIN_INTERVAL    3
+
++static uintmax_t freed_goal_compact_count;
++static uintmax_t freed_goal_bytes_returned;
+
++static void
++compact_with_freed_goal (byte_ct freed_bytes)
++{
++  static uintmax_t gc_counter;
++  static struct timespec last_compact;
++  static bool last_compact_set;
+
++  bool periodic = (++gc_counter >= FREED_GOAL_EVERY_N_GCS);
++  bool threshold = (freed_bytes >= (byte_ct) FREED_GOAL_FREED_THRESHOLD);
++  if (!periodic && !threshold)
++    return;
+
++  struct timespec now = current_timespec ();
++  if (last_compact_set)
++    {
++      struct timespec elapsed = timespec_sub (now, last_compact);
++      if (timespectod (elapsed) < FREED_GOAL_MIN_INTERVAL)
++        return;
++    }
+
++  /* Convert freed_bytes to size_t goal safely.
++     - If freed_bytes is zero (periodic trigger, no bytes freed),
++       use goal=0 (maximal) since we don't have a meaningful target.
++     - If freed_bytes > SIZE_MAX, clamp to SIZE_MAX.  */
++  size_t goal;
++  if (freed_bytes == 0)
++    goal = 0;                             /* maximal — no GC data */
++  else if (freed_bytes > (byte_ct) SIZE_MAX)
++    goal = SIZE_MAX;                      /* clamp: freed > addressable space */
++  else
++    goal = (size_t) freed_bytes;          /* exact conversion */
+
++  size_t released = malloc_zone_pressure_relief (NULL, goal);
++  freed_goal_compact_count++;
++  freed_goal_bytes_returned += released;
++  last_compact = now;
++  last_compact_set = true;
++  if (periodic) gc_counter = 0;
++}
+
++#endif /* HAVE_MALLOC_MALLOC_H */
+
+ /* It may be time to collect garbage.  */
+@@ -6012,13 +6102,23 @@
+   gcs_done++;
+
+   /* Collect profiling data.  */
++  byte_ct freed_bytes = 0;
+   if (tot_before != (byte_ct) -1)
+     {
+       byte_ct tot_after = total_bytes_of_live_objects ();
+       if (tot_after < tot_before)
+-	malloc_probe (min (tot_before - tot_after, SIZE_MAX));
++	{
++	  freed_bytes = tot_before - tot_after;
++	  malloc_probe (min (freed_bytes, SIZE_MAX));
++	}
+     }
+
++#ifdef HAVE_MALLOC_MALLOC_H
++  compact_with_freed_goal (freed_bytes);
++#endif

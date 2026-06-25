@@ -1,0 +1,44 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-translate-cache-identity-sentinel
+family: regex-translate-cache
+title: "Regex translate cache with 0xFFFF identity sentinel in uint16_t entries"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+design_dimensions:
+  entry_type: "uint16_t"
+  coverage: "0-127 (128 entries)"
+  sentinel_value: "0xFFFF — represents identity translation (c → c)"
+  sentinel_rationale: "0xFFFF is a Unicode non-character; not a valid byte translation result"
+  non_identity_range: "0x0000-0x00FE (byte-range results)"
+  out_of_range_handling: "translations with result > 254 stored as 0xFFFF (sentinel → slow path)"
+  memory_bytes_in_struct: 256
+  vs_baseline: "entry type is uint16_t (not unsigned char); explicit identity/non-identity distinction"
+dependencies: []
+conflicts:
+  - regex-translate-cache-baseline
+  - regex-translate-cache-lazy-bitmap
+  - regex-translate-cache-wide-entry
+  - regex-translate-cache-ascii-128
+  - regex-translate-cache-sidecar-allocation
+  - regex-translate-cache-table-generation
+expected_tradeoffs:
+  benefits:
+    - "Identity translations explicitly distinguished without extra validity bit"
+    - "NUL character (code 0) correctly handled: identity stored as 0xFFFF (not as 0)"
+    - "No silent truncation: out-of-range translations fall back to slow path"
+    - "0xFFFF sentinel is not confusable with any byte translation result"
+  costs:
+    - "uint16_t entries double memory from 128 bytes to 256 bytes for 128-entry cache"
+    - "Extra comparison in macro hot path (sentinel check before value return)"
+    - "Translations with result 255 (0xFF) are stored; result > 254 uses slow path"
+    - "Sentinel value 0xFFFF chosen by convention; static assertion recommended"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

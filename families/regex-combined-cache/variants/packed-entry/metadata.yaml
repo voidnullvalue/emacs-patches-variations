@@ -1,0 +1,43 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-combined-cache-packed-entry
+family: regex-combined-cache
+title: "Combined regex cache using packed uint16_t per character (syntax + translate)"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+design_dimensions:
+  entry_type: "uint16_t packed field"
+  bit_layout: "bits 0-4: syntax (5b) | bit 5: syntax_valid | bits 6-13: translate (8b) | bit 14: translate_valid | bit 15: reserved"
+  cache_size_bytes: 256
+  field_sufficiency: "syntax 5 bits covers all syntaxcode values <= 31; translate 8 bits covers 0-255"
+  overflow_handling: "syntax > 31 leaves syntax_valid clear; translate > 255 leaves translate_valid clear"
+  silent_truncation: "none — values that don't fit leave valid bit clear (safe slow path)"
+  vs_baseline: "single array of 16-bit packed entries vs two separate 8-bit arrays"
+dependencies: []
+conflicts:
+  - regex-combined-cache-baseline
+  - regex-combined-cache-unified-generation
+  - regex-combined-cache-search-path-hook
+  - regex-combined-cache-per-character-struct
+  - regex-combined-cache-independently-lazy
+  - regex-combined-cache-combined-sidecar
+expected_tradeoffs:
+  benefits:
+    - "Smallest combined cache: 256 bytes vs 384 bytes (baseline SoA) or 512 bytes (AoS)"
+    - "Single load covers both syntax and translate metadata for one character"
+    - "No struct padding: uint16_t array is tightly packed"
+    - "Explicit unsigned masks and shifts prevent sign-extension bugs"
+  costs:
+    - "Macro complexity: masks, shifts, and multiple OR operations in population"
+    - "Syntax codes > 31 are not cached (require static assertion to verify safety)"
+    - "Translate values > 255 are not cached (reasonable but requires documentation)"
+    - "Bit-field manipulation may confuse readers unfamiliar with the layout"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

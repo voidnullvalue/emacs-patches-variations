@@ -1,0 +1,131 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: 2-way set-associative cache — 256 sets × 2 ways = 512 total entries
+# Materially different from baseline: set-associative structure (vs direct-mapped);
+# deterministic CLOCK-per-set replacement (vs never-evict); memory statically bounded
+# at 512 entries; hash mapped to set index (top 8 bits of Fibonacci hash).
+diff --git a/src/nsterm.m b/src/nsterm.m
+index a7f3fc292c..0000000000 100644
+--- a/src/nsterm.m
++++ b/src/nsterm.m
+@@ -151,6 +151,122 @@
+
+ /* ==========================================================================
+
++   NSColor 2-way set-associative cache.
++
++   ========================================================================== */
++/* 256 sets, 2 ways each (512 total entries).  Collision policy: CLOCK-style
++   per-set replacement — each set has a 1-bit hand that alternates between the
++   two ways on eviction.  A slot is protected for one round by its reference
++   bit; on the next miss into the same set the bit is cleared and the slot is
++   eligible for replacement.
++
++   Hash-to-set mapping: use the top 8 bits of the Fibonacci hash so that the
++   mapping is uniform and independent of low-bit color patterns.
++
++   Memory: 512 × (pointer + unsigned long + 2 bools) ≈ 12 KB on LP64.
++   This is bounded and does not grow regardless of color diversity.  */
++
++#define NS_SA_SETS   256
++#define NS_SA_WAYS   2
++
++typedef struct
++{
++  NSColor      *color;
++  unsigned long key;
++  bool          occupied;
++  bool          clock_ref;
++} NsColorSAEntry;
++
++static NsColorSAEntry ns_sa_cache[NS_SA_SETS][NS_SA_WAYS];
++static int            ns_sa_hand[NS_SA_SETS];  /* 0 or 1, one per set */
++
++static unsigned int
++ns_sa_set_index (unsigned long key)
++{
++  /* Fibonacci hash, extract top 8 bits for set index.  */
++  return (unsigned int) ((key * 11400714819323198485ULL) >> 56);
++}
++
++static NSColor *
++ns_sa_lookup (unsigned long key)
++{
++  unsigned int s = ns_sa_set_index (key);
++  for (int w = 0; w < NS_SA_WAYS; w++)
++    {
++      if (ns_sa_cache[s][w].occupied && ns_sa_cache[s][w].key == key)
++        {
++          ns_sa_cache[s][w].clock_ref = true;
++          return ns_sa_cache[s][w].color;
++        }
++    }
++  return nil;
++}
++
++/* Return the way index to use for insertion into set S.
++   Prefers an unoccupied way; uses CLOCK otherwise.  */
++static int
++ns_sa_pick_way (unsigned int s)
++{
++  /* First pass: empty slot.  */
++  for (int w = 0; w < NS_SA_WAYS; w++)
++    if (!ns_sa_cache[s][w].occupied)
++      return w;
++
++  /* CLOCK: advance hand; if current slot has ref set, clear and try other.  */
++  for (int attempt = 0; attempt < NS_SA_WAYS * 2; attempt++)
++    {
++      int w = ns_sa_hand[s];
++      if (!ns_sa_cache[s][w].clock_ref)
++        {
++          ns_sa_hand[s] = (w + 1) % NS_SA_WAYS;
++          return w;
++        }
++      ns_sa_cache[s][w].clock_ref = false;
++      ns_sa_hand[s] = (w + 1) % NS_SA_WAYS;
++    }
++  /* Fallback: evict current hand position (all ref bits were set).  */
++  return ns_sa_hand[s];
++}
++
++static NSColor *
++ns_sa_insert (unsigned long key, NSColor *col)
++{
++  unsigned int s = ns_sa_set_index (key);
++  int w = ns_sa_pick_way (s);
++
++  if (ns_sa_cache[s][w].occupied)
++    [ns_sa_cache[s][w].color release];
++
++  ns_sa_cache[s][w].color    = [col retain];
++  ns_sa_cache[s][w].key      = key;
++  ns_sa_cache[s][w].occupied = true;
++  ns_sa_cache[s][w].clock_ref = true;
++  return ns_sa_cache[s][w].color;
++}
++
++
++/* ==========================================================================
++
+    NSColor, EmacsColor category.
+
+    ========================================================================== */
+@@ -184,12 +306,17 @@
+
+ + (NSColor *)colorWithUnsignedLong:(unsigned long)c
+ {
++  NSColor *cached = ns_sa_lookup (c);
++  if (cached != nil)
++    return cached;
++
+   EmacsCGFloat a = (double)((c >> 24) & 0xff) / 255.0;
+   EmacsCGFloat r = (double)((c >> 16) & 0xff) / 255.0;
+   EmacsCGFloat g = (double)((c >> 8) & 0xff) / 255.0;
+   EmacsCGFloat b = (double)(c & 0xff) / 255.0;
+
+-  return [NSColor colorForEmacsRed:r green:g blue:b alpha:a];
++  NSColor *col = [NSColor colorForEmacsRed:r green:g blue:b alpha:a];
++  return ns_sa_insert (c, col);
+ }
+
+ - (unsigned long)unsignedLong

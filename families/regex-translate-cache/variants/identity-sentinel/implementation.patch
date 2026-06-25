@@ -1,0 +1,61 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: identity-sentinel — use 0xFFFF as sentinel for identity translations
+# Materially different from baseline: entry type is uint16_t (vs unsigned char);
+# data representation uses a sentinel value; identity translations are explicitly
+# distinguished from cached non-identity values.
+diff --git a/src/regex-emacs.c b/src/regex-emacs.c
+index d8ed8a462a..0000000000 100644
+--- a/src/regex-emacs.c
++++ b/src/regex-emacs.c
+@@ -1196,6 +1196,32 @@
+ #define RE_TRANSLATE(TBL, C) char_table_translate (TBL, C)
+ #define TRANSLATE(d) (!NILP (translate) ? RE_TRANSLATE (translate, d) : (d))
+
++/* Identity-sentinel translate cache.
++
++   Entries are uint16_t with a special sentinel value 0xFFFF representing
++   the identity translation (c → c).  Non-identity translations are stored
++   as the translated value (0x0000–0x00FF for byte-range translations).
++   Translations with a result outside 0–254 are not stored (0xFFFF sentinel
++   is used as the safe fallback, which correctly returns C via the macro).
++
++   Design intent: the sentinel allows distinguishing "cached identity" from
++   "cached non-identity value of 0" without an extra validity bit.  This
++   is relevant because byte code 0 (NUL) may be translated to itself, and
++   distinguishing "cached as 0" from "not cached" requires a sentinel.
++
++   Sentinel range: 0xFFFF is not a valid Unicode code point (it is a
++   non-character) and is also outside the byte range 0–255, so it
++   cannot be confused with a real translation result.  */
++
++#define TRT_IDENTITY_SENTINEL  0xFFFFu
++
++#define TRANSLATE_TRU(C)						\
++  ((bufp->trt_ascii_valid && (unsigned) (C) < 128)			\
++   ? (bufp->trt_ascii[(unsigned char) (C)] == TRT_IDENTITY_SENTINEL	\
++      ? (int) (C)							\
++      : (int) bufp->trt_ascii[(unsigned char) (C)])			\
++   : TRANSLATE (C))
++
+
+diff --git a/src/regex-emacs.h b/src/regex-emacs.h
+index bcfff662f7..0000000000 100644
+--- a/src/regex-emacs.h
++++ b/src/regex-emacs.h
+@@ -XXXX,X +XXXX,X @@ struct re_pattern_buffer
+-  unsigned char trt_ascii[256];   /* byte-typed translate cache */
++  uint16_t trt_ascii[128];   /* identity-sentinel translate cache: 0xFFFF = identity */
+   bool_bf trt_ascii_valid : 1;
+
+@@ -XXXX,X +XXXX,X @@ re_compile_pattern population block:
++  for (int i = 0; i < 128; i++)
++    {
++      int t = !NILP (translate) ? char_table_translate (translate, i) : i;
++      if (t == i)
++        bufp->trt_ascii[i] = TRT_IDENTITY_SENTINEL;    /* identity */
++      else if (t >= 0 && t <= 254)
++        bufp->trt_ascii[i] = (uint16_t) t;             /* non-identity in range */
++      else
++        bufp->trt_ascii[i] = TRT_IDENTITY_SENTINEL;    /* out of range: sentinel = slow path */
++    }
++  bufp->trt_ascii_valid = true;

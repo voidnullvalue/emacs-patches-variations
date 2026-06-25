@@ -1,0 +1,145 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: effectiveness-backoff — reduce invocation frequency after low-yield calls
+# Materially different from baseline: trigger policy includes adaptive backoff
+# of GC-count interval after repeated low-yield compactions; reset on meaningful release.
+diff --git a/src/alloc.c b/src/alloc.c
+index 5fc166dbc2..0000000000 100644
+--- a/src/alloc.c
++++ b/src/alloc.c
+@@ -23,6 +23,10 @@
+ # include <malloc.h>
+ #endif
+
++#ifdef HAVE_MALLOC_MALLOC_H
++# include <malloc/malloc.h>
++#endif
++
+ #include <errno.h>
+ #include <stdint.h>
+ #include <stdlib.h>
+@@ -5798,6 +5802,142 @@
+   return Qnil;
+ }
+
++/* Effectiveness-backoff compaction variant.
++
++   Problem: the baseline runs compaction every 64 GCs regardless of recent
++   yield.  If the allocator consistently returns < 64 KB (low-yield workload),
++   these calls waste arena-walk time.
++
++   Solution: track the recent yield and apply exponential backoff when
++   consecutive compactions return below a "meaningful" threshold.  After
++   BACKOFF_N_INEFFECTIVE_MAX consecutive low-yield calls, double the GC
++   interval.  Cap at BACKOFF_MAX_INTERVAL.  Reset the interval after any
++   compaction that returns >= BACKOFF_LOW_YIELD_BYTES.
++
++   Backoff algorithm:
++   - Initial interval: 64 GCs (same as baseline).
++   - After 3 consecutive low-yield calls: double to 128.
++   - After 3 more: double to 256.
++   - After 3 more: cap at 512.
++   - Reset to 64 after any call returning >= BACKOFF_LOW_YIELD_BYTES.
++
++   Overflow safety: backoff_gc_interval is unsigned int; doubling is guarded
++   by comparing against BACKOFF_MAX_INTERVAL / 2 before doubling.
++
++   The threshold-trigger (freed_bytes >= BACKOFF_FREED_THRESHOLD) is
++   preserved alongside the backoff periodic trigger.  Either can fire.
++
++   Policy decisions (backoff_update) are independently testable
++   by calling the function with synthetic released-byte values.  */
++
++#ifdef HAVE_MALLOC_MALLOC_H
++
++#define BACKOFF_LOW_YIELD_BYTES      (64 * 1024)    /* < 64 KB = low yield */
++#define BACKOFF_N_INEFFECTIVE_MAX    3               /* streak before backoff */
++#define BACKOFF_INITIAL_INTERVAL     64              /* GCs between periodic fires */
++#define BACKOFF_MAX_INTERVAL         512             /* maximum GC interval */
++#define BACKOFF_FREED_THRESHOLD      (4 * 1024 * 1024)
++#define BACKOFF_MIN_INTERVAL_SECS    3
+
++static unsigned int backoff_gc_interval = BACKOFF_INITIAL_INTERVAL;
++static unsigned int backoff_ineffective_streak;
++static uintmax_t    backoff_gc_counter;
++static uintmax_t    backoff_compacts_done;
++static uintmax_t    backoff_bytes_returned;
+
++/* Update backoff state after one compaction.
++   Independently testable: no dependency on global Emacs state.  */
++void
++backoff_update (size_t released)
++{
++  backoff_compacts_done++;
++  backoff_bytes_returned += released;
+
++  if (released >= BACKOFF_LOW_YIELD_BYTES)
++    {
++      /* Meaningful release: reset backoff to initial interval.  */
++      backoff_ineffective_streak = 0;
++      backoff_gc_interval = BACKOFF_INITIAL_INTERVAL;
++    }
++  else
++    {
++      /* Low yield: increment streak counter.  */
++      backoff_ineffective_streak++;
++      if (backoff_ineffective_streak >= BACKOFF_N_INEFFECTIVE_MAX)
++        {
++          backoff_ineffective_streak = 0;
++          /* Double the interval, guarded against overflow.  */
++          if (backoff_gc_interval <= BACKOFF_MAX_INTERVAL / 2)
++            backoff_gc_interval *= 2;
++          else
++            backoff_gc_interval = BACKOFF_MAX_INTERVAL;
++        }
++    }
++}
+
++static void
++maybe_compact_memory_backoff (byte_ct freed_bytes)
++{
++  static struct timespec last_compact;
++  static bool last_compact_set;
+
++  bool periodic = (++backoff_gc_counter >= (uintmax_t) backoff_gc_interval);
++  bool threshold = (freed_bytes >= (byte_ct) BACKOFF_FREED_THRESHOLD);
++  if (!periodic && !threshold)
++    return;
+
++  struct timespec now = current_timespec ();
++  if (last_compact_set)
++    {
++      struct timespec elapsed = timespec_sub (now, last_compact);
++      if (timespectod (elapsed) < BACKOFF_MIN_INTERVAL_SECS)
++        return;
++    }
+
++  if (periodic) backoff_gc_counter = 0;  /* reset before walk */
+
++  size_t released = malloc_zone_pressure_relief (NULL, 0);
++  last_compact = now;
++  last_compact_set = true;
++  backoff_update (released);
++}
+
++#endif /* HAVE_MALLOC_MALLOC_H */
+
+ /* It may be time to collect garbage.  */
+@@ -6012,13 +6152,23 @@
+   gcs_done++;
+
+   /* Collect profiling data.  */
++  byte_ct freed_bytes = 0;
+   if (tot_before != (byte_ct) -1)
+     {
+       byte_ct tot_after = total_bytes_of_live_objects ();
+       if (tot_after < tot_before)
+-	malloc_probe (min (tot_before - tot_after, SIZE_MAX));
++	{
++	  freed_bytes = tot_before - tot_after;
++	  malloc_probe (min (freed_bytes, SIZE_MAX));
++	}
+     }
+
++#ifdef HAVE_MALLOC_MALLOC_H
++  maybe_compact_memory_backoff (freed_bytes);
++#endif
