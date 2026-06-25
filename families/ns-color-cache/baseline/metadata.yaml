@@ -1,0 +1,36 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: ns-color-cache-baseline
+family: ns-color-cache
+title: "NSColor direct-mapped process-lifetime cache (Fibonacci hash, 32768 slots)"
+llm_assisted: true
+llm_system: "Claude Code"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/nsterm.m: a7f3fc292c"
+files_modified:
+  - src/nsterm.m
+design_dimensions:
+  cache_structure: "direct-mapped array, power-of-2 size"
+  hash_function: "Fibonacci multiplicative (key * 11400714819323198485)"
+  cache_size: 32768
+  eviction_policy: "none — slots never freed once claimed"
+  lifetime: "process lifetime"
+  scope: "global (single table shared across all frames)"
+  thread_safety: "none required (NS drawing always on main thread)"
+  key_type: "unsigned long (packed 32-bit ARGB pixel)"
+  value_type: "NSColor* (retained)"
+dependencies: []
+conflicts:
+  - ns-color-cache-per-frame
+expected_tradeoffs:
+  benefits:
+    - "Zero allocator/autorelease overhead for repeated colors"
+    - "Single array-index lookup for hits (O(1), cache-line friendly)"
+    - "No eviction logic overhead"
+  costs:
+    - "32768 * 16 bytes = ~512 KB resident for pointers + keys"
+    - "Hash collision silently falls back to slow path (no retry)"
+    - "Memory never reclaimed even if color is never seen again"
+apply_status: "clean — extracted directly from archive/original/ns_color_cache_0001.patch"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

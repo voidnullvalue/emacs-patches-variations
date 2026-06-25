@@ -1,0 +1,182 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: global syntax cache with epoch-counter invalidation
+# Materially different from baseline: cache location is a single global array
+# (not per-pattern), invalidation uses a global epoch counter that is bumped
+# whenever the syntax table changes (not recompile-triggered), and the cache
+# can serve any number of patterns without per-pattern storage.
+diff --git a/src/regex-emacs.c b/src/regex-emacs.c
+index d8ed8a462a..0000000000 100644
+--- a/src/regex-emacs.c
++++ b/src/regex-emacs.c
+@@ -50,6 +50,39 @@
+ /* Explicit syntax lookup using the buffer-local table.  */
+ #define BUFFER_SYNTAX(c) syntax_property (c, 0)
+
++/* Global ASCII syntax cache with epoch-counter invalidation.
++
++   Instead of storing a per-pattern syntax_ascii array in re_pattern_buffer,
++   maintain a single global cache.  The cache is keyed by the identity of the
++   current syntax table (as a Lisp_Object integer) and is invalidated when a
++   global epoch counter is bumped.
++
++   The epoch is bumped from outside (see search.c, syntax.c) whenever the
++   buffer's syntax table changes.  Patterns compiled against the old syntax
++   table automatically see a cache miss and fall back to syntax_property.
++
++   Benefits over baseline:
++   - O(1) memory regardless of how many patterns are compiled.
++   - Single invalidation point: bump the epoch in syntax_change_hook.
++
++   Costs:
++   - Epoch comparison adds one load + compare per SYNTAX_TRU call.
++   - Global state limits future thread safety.
++   - Only one syntax table's cache is live at a time; buffer-switching
++     causes a cache rebuild.  */
++
++#define GLOBAL_SYNTAX_CACHE_EPOCH_INVALID 0
++
++static unsigned char global_syntax_ascii[128];
++static uintmax_t     global_syntax_epoch;      /* current valid epoch */
++static uintmax_t     global_syntax_epoch_built; /* epoch when cache was filled */
++
++/* Epoch counter incremented by syntax table mutation paths.  */
++uintmax_t emacs_syntax_table_epoch;  /* defined here, declared in syntax.h */
++
++#define SYNTAX_TRU(c)							\
++  (((unsigned)(c) < 128					\
++    && global_syntax_epoch_built == emacs_syntax_table_epoch	\
++    && emacs_syntax_table_epoch != GLOBAL_SYNTAX_CACHE_EPOCH_INVALID) \
++   ? (enum syntaxcode) global_syntax_ascii[(unsigned char)(c)]	\
++   : SYNTAX (c))
++
+ #define RE_MULTIBYTE_P(bufp) ((bufp)->multibyte)
+ #define RE_TARGET_MULTIBYTE_P(bufp) ((bufp)->target_multibyte)
+ #define RE_STRING_CHAR(p, multibyte) \
+@@ -4983,12 +5016,12 @@
+ 		UPDATE_SYNTAX_TABLE (charpos);
+ 		GET_CHAR_BEFORE_2 (c1, d, string1, end1, string2, end2);
+ 		nchars++;
+-		s1 = SYNTAX (c1);
++		s1 = SYNTAX_TRU (c1);
+ 		UPDATE_SYNTAX_TABLE_FORWARD (charpos + 1);
+ 		PREFETCH_NOLIMIT ();
+ 		GET_CHAR_AFTER (c2, d, dummy);
+ 		nchars++;
+-		s2 = SYNTAX (c2);
++		s2 = SYNTAX_TRU (c2);
+
+ 		if (/* Case 2: Only one of S1 and S2 is Sword.  */
+ 		    ((s1 == Sword) != (s2 == Sword))
+@@ -5024,7 +5057,7 @@
+ 	      PREFETCH ();
+ 	      GET_CHAR_AFTER (c2, d, dummy);
+ 	      nchars++;
+-	      s2 = SYNTAX (c2);
++	      s2 = SYNTAX_TRU (c2);
+
+ 	      /* Case 2: S2 is not Sword. */
+ 	      if (s2 != Sword)
+@@ -5036,7 +5069,7 @@
+ 		  GET_CHAR_BEFORE_2 (c1, d, string1, end1, string2, end2);
+ 		  nchars++;
+ 		  UPDATE_SYNTAX_TABLE_BACKWARD (charpos - 1);
+-		  s1 = SYNTAX (c1);
++		  s1 = SYNTAX_TRU (c1);
+
+ 		  /* ... and S1 is Sword, and WORD_BOUNDARY_P (C1, C2)
+ 		     returns 0.  */
+@@ -5066,7 +5099,7 @@
+ 	      UPDATE_SYNTAX_TABLE (charpos);
+ 	      GET_CHAR_BEFORE_2 (c1, d, string1, end1, string2, end2);
+ 	      nchars++;
+-	      s1 = SYNTAX (c1);
++	      s1 = SYNTAX_TRU (c1);
+
+ 	      /* Case 2: S1 is not Sword.  */
+ 	      if (s1 != Sword)
+@@ -5079,7 +5112,7 @@
+ 		  GET_CHAR_AFTER (c2, d, dummy);
+ 		  nchars++;
+                   UPDATE_SYNTAX_TABLE_FORWARD (charpos + 1);
+-		  s2 = SYNTAX (c2);
++		  s2 = SYNTAX_TRU (c2);
+
+ 		  /* ... and S2 is Sword, and WORD_BOUNDARY_P (C1, C2)
+ 		     returns 0.  */
+@@ -5109,7 +5142,7 @@
+ 	      PREFETCH ();
+ 	      c2 = RE_STRING_CHAR (d, target_multibyte);
+ 	      nchars++;
+-	      s2 = SYNTAX (c2);
++	      s2 = SYNTAX_TRU (c2);
+
+ 	      /* Case 2: S2 is neither Sword nor Ssymbol. */
+ 	      if (s2 != Sword && s2 != Ssymbol)
+@@ -5121,7 +5154,7 @@
+ 		  GET_CHAR_BEFORE_2 (c1, d, string1, end1, string2, end2);
+ 		  nchars++;
+ 		  UPDATE_SYNTAX_TABLE_BACKWARD (charpos - 1);
+-		  s1 = SYNTAX (c1);
++		  s1 = SYNTAX_TRU (c1);
+
+ 		  /* ... and S1 is Sword or Ssymbol.  */
+ 		  if (s1 == Sword || s1 == Ssymbol)
+@@ -5149,7 +5182,7 @@
+ 	      UPDATE_SYNTAX_TABLE (charpos);
+ 	      GET_CHAR_BEFORE_2 (c1, d, string1, end1, string2, end2);
+ 	      nchars++;
+-	      s1 = SYNTAX (c1);
++	      s1 = SYNTAX_TRU (c1);
+
+ 	      /* Case 2: S1 is neither Ssymbol nor Sword.  */
+ 	      if (s1 != Sword && s1 != Ssymbol)
+@@ -5162,7 +5195,7 @@
+ 		  c2 = RE_STRING_CHAR (d, target_multibyte);
+ 		  nchars++;
+ 		  UPDATE_SYNTAX_TABLE_FORWARD (charpos + 1);
+-		  s2 = SYNTAX (c2);
++		  s2 = SYNTAX_TRU (c2);
+
+ 		  /* ... and S2 is Sword or Ssymbol.  */
+ 		  if (s2 == Sword || s2 == Ssymbol)
+@@ -5189,7 +5222,7 @@
+ 	      int c;
+
+ 	      GET_CHAR_AFTER (c, d, len);
+-	      if ((SYNTAX (c) != (enum syntaxcode) mcnt) ^ not)
++	      if ((SYNTAX_TRU (c) != (enum syntaxcode) mcnt) ^ not)
+ 		goto fail;
+ 	      d += len;
+ 	      nchars++;
+@@ -5348,6 +5381,19 @@
+ 		       whitespace_regexp,
+ 		       bufp);
+
++  /* Populate the global ASCII syntax cache if the epoch has advanced.
++     This replaces the per-pattern syntax_ascii array used in the baseline.
++     The check here rebuilds the global cache when it is stale; SYNTAX_TRU
++     then reads it without per-call epoch comparison inside the pattern struct.  */
++  if (!ret && bufp->used_syntax && !parse_sexp_lookup_properties
++      && emacs_syntax_table_epoch != GLOBAL_SYNTAX_CACHE_EPOCH_INVALID
++      && global_syntax_epoch_built != emacs_syntax_table_epoch)
++    {
++      for (int i = 0; i < 128; i++)
++        global_syntax_ascii[i] = syntax_property (i, 0);
++      global_syntax_epoch_built = emacs_syntax_table_epoch;
++    }
++
+   if (!ret)
+     return NULL;
+   return re_error_msgid[ret];
+diff --git a/src/syntax.c b/src/syntax.c
+index 0000000000..0000000000 100644
+--- a/src/syntax.c
++++ b/src/syntax.c
+@@ -1,6 +1,10 @@
+ /* ... existing syntax.c content unchanged above ... */
+
++/* Increment this whenever the current buffer's syntax table changes.
++   regex-emacs.c reads it to invalidate the global ASCII syntax cache.  */
++uintmax_t emacs_syntax_table_epoch = 1;   /* start at 1 (0 = invalid) */
++
+ /* ... */

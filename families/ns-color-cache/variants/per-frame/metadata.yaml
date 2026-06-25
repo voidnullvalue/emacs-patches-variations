@@ -1,0 +1,43 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: ns-color-cache-per-frame
+family: ns-color-cache
+title: "NSColor per-frame cache stored as NSMutableDictionary on EmacsView"
+llm_assisted: true
+llm_system: "Claude Code"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/nsterm.m: a7f3fc292c"
+files_modified:
+  - src/nsterm.m
+  - src/nsterm.h
+design_dimensions:
+  cache_structure: "NSMutableDictionary (keyed by NSNumber)"
+  cache_location: "EmacsView instance variable (colorCache)"
+  lifetime: "frame lifetime (released in -dealloc)"
+  scope: "per-frame — each EmacsView has its own cache"
+  invalidation: "automatic on frame deletion"
+  eviction_policy: "none within a frame's lifetime"
+  thread_safety: "none required (NS drawing always on main thread)"
+  key_type: "NSNumber (@(unsigned long))"
+  value_type: "NSColor* (retained by dictionary)"
+dependencies:
+  - "EmacsView class must be accessible"
+  - "nsterm.h must be modifiable to add ivar"
+conflicts:
+  - ns-color-cache-baseline
+  - ns-color-cache-open-addressing
+  - ns-color-cache-counted-lru
+expected_tradeoffs:
+  benefits:
+    - "Correct color isolation across frames on different displays"
+    - "Cache released automatically when frame closes (no memory leak)"
+    - "No global state — safer for future multi-threaded rendering"
+    - "NSMutableDictionary grows as needed, no fixed-size table"
+  costs:
+    - "NSMutableDictionary lookup O(1) but with higher constant than direct-mapped array"
+    - "NSNumber boxing allocates objects for dictionary keys"
+    - "Cache miss on first draw of each color per frame"
+    - "Requires nsterm.h modification (ivar addition)"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

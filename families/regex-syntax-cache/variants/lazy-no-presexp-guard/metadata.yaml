@@ -1,0 +1,37 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-syntax-cache-lazy-no-presexp-guard
+family: regex-syntax-cache
+title: "ASCII syntax cache with runtime text-property guard instead of compile-time parse_sexp_lookup_properties disable"
+llm_assisted: true
+llm_system: "Claude Code"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+design_dimensions:
+  cache_location: "per-pattern (re_pattern_buffer)"
+  population_strategy: "eager — always populated when used_syntax is set (no parse_sexp guard)"
+  validity_mechanism: "bool_bf flag + runtime text-property check per call"
+  guard: "runtime: position_has_syntax_property(charpos) per SYNTAX_TRU call"
+  coverage: "ASCII (0-127)"
+  entry_type: "unsigned char"
+  text_property_cost: "Fget_text_property call on every SYNTAX_TRU for positions with potential overrides"
+dependencies: []
+conflicts:
+  - regex-syntax-cache-baseline
+  - regex-syntax-cache-global-epoch
+expected_tradeoffs:
+  benefits:
+    - "Cache enabled even when parse_sexp_lookup_properties is non-nil"
+    - "In practice most characters lack syntax-table text properties; runtime check is cheap on those"
+    - "More contexts benefit from the optimization"
+  costs:
+    - "Fget_text_property called on every SYNTAX_TRU — significant overhead if positions have text properties"
+    - "More complex SYNTAX_TRU macro with position argument"
+    - "PTR_TO_OFFSET(d) must be correct at every call site — subtle correctness requirement"
+    - "Position check is more expensive than the simple bool flag in the baseline"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

@@ -1,0 +1,98 @@
+{
+  "llm_assisted": true,
+  "llm_system": "Claude Code",
+  "llm_model": "claude-sonnet-4-6",
+  "generated_date": "2026-06-25",
+  "purpose": "Defensive publication and reproducible performance research atlas for Emacs optimizations",
+  "base_emacs_revision": {
+    "status": "unknown",
+    "blob_hashes": {
+      "src/alloc.c": "5fc166dbc2",
+      "src/nsterm.m": "a7f3fc292c",
+      "src/regex-emacs.c": "d8ed8a462a",
+      "src/regex-emacs.h": "bcfff662f7"
+    },
+    "contextual_bound": "Emacs 29.x or early 30 pre-release"
+  },
+  "families": [
+    {
+      "id": "ns-color-cache",
+      "files": ["src/nsterm.m"],
+      "baseline": "families/ns-color-cache/baseline/implementation.patch",
+      "baseline_source": "archive/original/ns_color_cache_0001.patch",
+      "baseline_clean": true,
+      "variants": [
+        "families/ns-color-cache/variants/open-addressing",
+        "families/ns-color-cache/variants/per-frame",
+        "families/ns-color-cache/variants/counted-lru"
+      ]
+    },
+    {
+      "id": "malloc-pressure-relief",
+      "files": ["src/alloc.c"],
+      "baseline": "families/malloc-pressure-relief/baseline/implementation.patch",
+      "baseline_source": "archive/original/memory_compact_0001.patch",
+      "baseline_clean": true,
+      "variants": [
+        "families/malloc-pressure-relief/variants/background-dispatch",
+        "families/malloc-pressure-relief/variants/adaptive-threshold"
+      ]
+    },
+    {
+      "id": "regex-syntax-cache",
+      "files": ["src/regex-emacs.c", "src/regex-emacs.h"],
+      "baseline": "families/regex-syntax-cache/baseline/implementation.patch",
+      "baseline_source": "archive/original/re_ascii_caches_0001.patch",
+      "baseline_clean": false,
+      "baseline_reconstruction": "AUDIT.md Note 1",
+      "variants": [
+        "families/regex-syntax-cache/variants/global-epoch",
+        "families/regex-syntax-cache/variants/lazy-no-presexp-guard"
+      ]
+    },
+    {
+      "id": "regex-translate-cache",
+      "files": ["src/regex-emacs.c", "src/regex-emacs.h"],
+      "baseline": "families/regex-translate-cache/baseline/implementation.patch",
+      "baseline_source": "archive/original/re_ascii_translate_cache_0001.patch",
+      "baseline_clean": true,
+      "variants": [
+        "families/regex-translate-cache/variants/lazy-bitmap",
+        "families/regex-translate-cache/variants/wide-entry"
+      ]
+    },
+    {
+      "id": "regex-combined-cache",
+      "files": ["src/regex-emacs.c", "src/regex-emacs.h"],
+      "baseline": "families/regex-combined-cache/baseline/implementation.patch",
+      "baseline_source": "archive/original/ascii_caches_combined_0001.patch",
+      "baseline_clean": false,
+      "baseline_reconstruction": "AUDIT.md Note 2",
+      "variants": [
+        "families/regex-combined-cache/variants/unified-generation",
+        "families/regex-combined-cache/variants/search-path-hook"
+      ]
+    }
+  ],
+  "compositions": [
+    {
+      "id": "ns-color-cache+malloc-pressure-relief",
+      "patch": "combinations/ns-color-cache+malloc-pressure-relief.patch",
+      "families": ["ns-color-cache", "malloc-pressure-relief"],
+      "conflicts": false
+    }
+  ],
+  "tests": [
+    "tests/ns-color-cache/test_cache_logic.m",
+    "tests/regex-syntax-cache/test_syntax_cache.c",
+    "tests/regex-translate-cache/test_translate_cache.c",
+    "tests/malloc-pressure-relief/test_threshold_logic.c"
+  ],
+  "benchmarks": [
+    "benchmarks/bench_regex_caches.sh"
+  ],
+  "tools": [
+    "tools/verify_patch.sh",
+    "tools/audit_patch_contents.sh"
+  ]
+}

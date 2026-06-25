@@ -1,0 +1,39 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-syntax-cache-global-epoch
+family: regex-syntax-cache
+title: "Global ASCII syntax cache with epoch-counter invalidation (O(1) memory)"
+llm_assisted: true
+llm_system: "Claude Code"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/syntax.c
+design_dimensions:
+  cache_location: "global (single 128-byte array, not in re_pattern_buffer)"
+  population_strategy: "eager — rebuilt at re_compile_pattern when epoch mismatches"
+  validity_mechanism: "epoch counter comparison (global_syntax_epoch_built vs emacs_syntax_table_epoch)"
+  invalidation: "emacs_syntax_table_epoch incremented at syntax table mutation sites"
+  coverage: "ASCII (0-127)"
+  entry_type: "unsigned char"
+  memory_pattern: "O(1) regardless of pattern count"
+  per_pattern_overhead: "zero (no new fields in re_pattern_buffer)"
+dependencies:
+  - "emacs_syntax_table_epoch counter must be incremented at all syntax table mutation sites in syntax.c"
+conflicts:
+  - regex-syntax-cache-baseline
+  - regex-syntax-cache-lazy-no-presexp-guard
+expected_tradeoffs:
+  benefits:
+    - "Zero per-pattern memory overhead (no struct field addition)"
+    - "Single cache shared across all simultaneously compiled patterns"
+    - "Epoch invalidation is explicit and does not require recompile"
+  costs:
+    - "Cache only valid for one syntax table at a time (buffer switch causes rebuild)"
+    - "Requires modifying syntax.c to bump epoch counter on every syntax table change"
+    - "Global state is incompatible with potential future parallelism"
+    - "SYNTAX_TRU macro is slightly more complex (three comparisons vs one flag check)"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

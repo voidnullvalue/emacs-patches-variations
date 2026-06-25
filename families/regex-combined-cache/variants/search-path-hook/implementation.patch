@@ -1,0 +1,175 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: cache reuse across successive searches via search.c integration
+# Materially different from baseline: integration point (search.c compile_pattern
+# wrapper rather than regex-emacs.c re_compile_pattern), cache lifetime (reused
+# across multiple search calls with the same pattern text and tables rather than
+# per-recompile), and an explicit "last compiled" cache to skip redundant recompiles.
+diff --git a/src/search.c b/src/search.c
+index 0000000000..0000000000 100644
+--- a/src/search.c
++++ b/src/search.c
+@@ -1,6 +1,12 @@
+ /* search.c -- Lisp functions pertaining to searching and matching.  */
+
++/* LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
++   search-path-hook variant: cache_key-based reuse of the last compiled
++   pattern to avoid re_compile_pattern + cache rebuild when the same pattern
++   is searched repeatedly with the same syntax table and translate table.  */
++
+ /* ... existing includes ... */
++#include "regex-emacs.h"
++#include "syntax.h"
+
+ /* ... */
+
+@@ -200,6 +206,90 @@ compile_pattern (Lisp_Object pattern, struct re_registers *regs,
+                  bool posix)
+ {
+
++/* Search-path cache: avoid recompiling and re-caching a pattern that was
++   compiled on the previous call with identical parameters.
++
++   Key: (pattern text, length, syntax table identity, translate table identity).
++   If all four match the last compilation, reuse the last compiled bufp
++   and skip both re_compile_pattern and ASCII cache population.
++
++   This is the outermost optimization layer: it short-circuits even the
++   per-pattern cache population in re_compile_pattern.
++
++   Correctness:
++   - Pattern text is compared byte-by-byte (length + content).
++   - Syntax table identity: compare Lisp_Object (pointer equality for live tables).
++   - Translate table identity: same.
++   - If the current buffer's syntax table or translate table is modified between
++     calls, its Lisp_Object pointer changes (new table object), so the key mismatches.
++
++   Limitations:
++   - Single-entry cache (last compiled only); no LRU for multiple alternating patterns.
++   - Key comparison uses string bytes, not semantic equivalence.
++   - Not safe across buffer switches unless syntax/translate table pointers change.  */
++
++typedef struct {
++  unsigned char  *pattern_bytes;
++  ptrdiff_t       pattern_len;
++  Lisp_Object     syntax_table;
++  Lisp_Object     translate;
++  bool            multibyte;
++  struct re_pattern_buffer *bufp;  /* last compiled pattern (owned by pattern cache) */
++} SearchPathCache;
++
++static SearchPathCache sp_cache;
++
++static bool
++sp_cache_key_matches (Lisp_Object pattern, bool posix,
++                      Lisp_Object translate)
++{
++  if (sp_cache.bufp == NULL)
++    return false;
++
++  /* Check multibyte, translate, and current syntax table first (cheap).  */
++  if (!EQ (sp_cache.translate, translate))
++    return false;
++  if (!EQ (sp_cache.syntax_table,
++           BVAR (current_buffer, syntax_table)))
++    return false;
++
++  /* Pattern text comparison.  */
++  ptrdiff_t len = SBYTES (pattern);
++  if (sp_cache.pattern_len != len)
++    return false;
++  if (memcmp (sp_cache.pattern_bytes, SDATA (pattern), len) != 0)
++    return false;
++
++  return true;
++}
++
++static void
++sp_cache_update (Lisp_Object pattern, Lisp_Object translate,
++                 struct re_pattern_buffer *bufp)
++{
++  ptrdiff_t len = SBYTES (pattern);
++
++  if (sp_cache.pattern_bytes == NULL
++      || sp_cache.pattern_len < len)
++    {
++      xfree (sp_cache.pattern_bytes);
++      sp_cache.pattern_bytes = xmalloc (len);
++    }
++
++  memcpy (sp_cache.pattern_bytes, SDATA (pattern), len);
++  sp_cache.pattern_len  = len;
++  sp_cache.translate    = translate;
++  sp_cache.syntax_table = BVAR (current_buffer, syntax_table);
++  sp_cache.bufp         = bufp;
++}
++
++  /* ---- Fast path: reuse last compilation if key matches.  ---- */
++  if (sp_cache_key_matches (pattern, posix, translate))
++    {
++      /* Caches in bufp are already populated from the previous compile.
++         Skip re_compile_pattern entirely.  */
++      return sp_cache.bufp;
++    }
++
+   /* ... original compile_pattern body (pattern lookup, re_compile_pattern call) ... */
+
++  /* Update cache after successful compilation.  */
++  sp_cache_update (pattern, translate, bufp);
+
+   return bufp;
+ }
+diff --git a/src/regex-emacs.c b/src/regex-emacs.c
+index d8ed8a462a..0000000000 100644
+--- a/src/regex-emacs.c
++++ b/src/regex-emacs.c
+@@ -50,6 +50,19 @@
+ /* Explicit syntax lookup using the buffer-local table.  */
+ #define BUFFER_SYNTAX(c) syntax_property (c, 0)
+
++#define SYNTAX_TRU(c)							\
++  ((bufp->syntax_ascii_valid && (unsigned) (c) < 128)			\
++   ? (enum syntaxcode) bufp->syntax_ascii[(unsigned char) (c)]	\
++   : SYNTAX (c))
++
+ #define RE_MULTIBYTE_P(bufp) ((bufp)->multibyte)
+@@ -1196,6 +1209,16 @@
+ #define RE_TRANSLATE(TBL, C) char_table_translate (TBL, C)
+ #define TRANSLATE(d) (!NILP (translate) ? RE_TRANSLATE (translate, d) : (d))
+
++#define TRANSLATE_TRU(C)					\
++  ((bufp->trt_ascii_valid && (unsigned) (C) < 128)		\
++   ? bufp->trt_ascii[(unsigned char) (C)]				\
++   : TRANSLATE (C))
++
+ /* ... all TRANSLATE_TRU and SYNTAX_TRU usage sites (same as baseline) ... */
+
+@@ -5348,6 +5377,41 @@
+ 		       whitespace_regexp,
+ 		       bufp);
+
++  /* Populate both ASCII caches at compile time (same as baseline).  */
++  if (!ret && !NILP (bufp->translate))
++    {
++      for (int i = 0; i < 256; i++)
++	{
++	  int ch = char_table_translate (bufp->translate, i);
++	  int byte = CHAR_TO_BYTE_SAFE (ch);
++	  bufp->trt_ascii[i] = (byte >= 0 ? byte : i);
++	}
++      bufp->trt_ascii_valid = true;
++    }
++  else
++    bufp->trt_ascii_valid = false;
++
++  if (!ret && bufp->used_syntax && !parse_sexp_lookup_properties)
++    {
++      for (int i = 0; i < 128; i++)
++	bufp->syntax_ascii[i] = syntax_property (i, 0);
++      bufp->syntax_ascii_valid = true;
++    }
++  else
++    bufp->syntax_ascii_valid = false;
++
+   if (!ret)
+     return NULL;
+   return re_error_msgid[ret];

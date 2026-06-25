@@ -1,0 +1,38 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-translate-cache-lazy-bitmap
+family: regex-translate-cache
+title: "Lazy translate cache with 256-bit per-entry valid bitmap (fill on first access)"
+llm_assisted: true
+llm_system: "Claude Code"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+design_dimensions:
+  cache_location: "per-pattern (re_pattern_buffer)"
+  population_strategy: "lazy — each entry filled on first access via bit-test/fill in TRANSLATE_TRU macro"
+  validity_mechanism: "per-entry 256-bit bitmap (32 bytes) + single bool_bf for overall enable"
+  coverage: "0-127 via fast path (128-255 always slow path)"
+  entry_type: "unsigned char"
+  compile_time_cost: "memset(32 bytes) instead of 256 char_table_translate calls"
+  hot_path_overhead: "1 extra bit-test per TRANSLATE_TRU call vs baseline's 1 flag check"
+  size_bytes_added: 289
+dependencies: []
+conflicts:
+  - regex-translate-cache-baseline
+  - regex-translate-cache-wide-entry
+expected_tradeoffs:
+  benefits:
+    - "Compile-time cost reduced to memset(32) vs 256 char_table_translate calls"
+    - "Patterns that match only a few distinct characters pay less per compilation"
+    - "Amortized: frequently-accessed characters are filled once and cached permanently"
+  costs:
+    - "32 extra bytes (bitmap) added to re_pattern_buffer vs 0 in baseline"
+    - "Extra bit-test on every TRANSLATE_TRU call"
+    - "TRT_BIT_FILL macro is not atomic; cannot be used from multiple threads"
+    - "First access to any character has the full char_table_translate cost"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

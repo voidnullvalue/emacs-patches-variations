@@ -1,0 +1,35 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-combined-cache-baseline
+family: regex-combined-cache
+title: "Combined ASCII syntax + translate cache in re_pattern_buffer"
+llm_assisted: true
+llm_system: "Claude Code"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+design_dimensions:
+  cache_location: "per-pattern (fields in re_pattern_buffer)"
+  components: ["trt_ascii (256 unsigned char)", "syntax_ascii (128 unsigned char)"]
+  validity_mechanism: "two independent bool_bf flags (trt_ascii_valid, syntax_ascii_valid)"
+  population_strategy: "eager — both tables filled at re_compile_pattern time"
+  invalidation: "recompile pattern"
+  total_size_bytes: 384
+dependencies: []
+conflicts:
+  - regex-syntax-cache-baseline
+  - regex-translate-cache-baseline
+expected_tradeoffs:
+  benefits:
+    - "All benefits of both individual caches simultaneously"
+    - "Single patch to apply (no merge conflicts between the two)"
+    - "Independence: either cache can be valid while the other is not"
+  costs:
+    - "384 bytes added to re_pattern_buffer"
+    - "Two initialization blocks at compile time"
+    - "Higher ABI impact than either individual patch"
+apply_status: "reconstructed — src/alloc.c and src/nsterm.m removed from ascii_caches_combined_0001.patch; regex sections verbatim"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

@@ -1,0 +1,41 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: malloc-pressure-relief-background-dispatch
+family: malloc-pressure-relief
+title: "Malloc-zone pressure relief dispatched to GCD background queue (zero GC pause)"
+llm_assisted: true
+llm_system: "Claude Code"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/alloc.c: 5fc166dbc2"
+files_modified:
+  - src/alloc.c
+design_dimensions:
+  timing: "asynchronous — dispatched to GCD serial background queue after GC"
+  queue_qos: "QOS_CLASS_BACKGROUND (lowest OS priority)"
+  trigger_policy: "freed_bytes >= 1MB (lower threshold vs baseline's 4MB)"
+  rate_limit: "minimum 5 seconds between dispatches"
+  overlap_prevention: "atomic in-flight flag"
+  thread_safety: "malloc_zone_pressure_relief is thread-safe per Apple docs"
+  gc_pause_impact: "zero — compaction runs on background thread"
+  platform: "macOS only (#ifdef HAVE_MALLOC_MALLOC_H)"
+dependencies:
+  - "libdispatch (GCD) — standard on macOS"
+  - "C11 stdatomic.h"
+conflicts:
+  - malloc-pressure-relief-baseline
+  - malloc-pressure-relief-adaptive-threshold
+expected_tradeoffs:
+  benefits:
+    - "Zero GC pause — compaction does not block the main thread"
+    - "Lower freed threshold (1MB) because dispatching is cheap"
+    - "Background priority prevents competition with Emacs's own threads"
+    - "Atomic flag prevents multiple concurrent compactions"
+  costs:
+    - "Compaction effect is delayed (runs after GC, not during)"
+    - "Concurrent allocation from main thread may interfere with compaction"
+    - "Adds dependency on libdispatch (already present on macOS)"
+    - "More complex control flow than baseline"
+    - "stat block captures no Emacs state (cannot safely call Lisp functions)"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

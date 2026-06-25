@@ -1,0 +1,106 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: syntax cache without parse_sexp_lookup_properties guard;
+#          runtime position check falls back to syntax_property when text property present.
+# Materially different from baseline: guard is removed from compile time;
+# SYNTAX_TRU performs a runtime check for whether the current position has
+# a syntax-table text property, enabling the cache in more contexts.
+diff --git a/src/regex-emacs.c b/src/regex-emacs.c
+index d8ed8a462a..0000000000 100644
+--- a/src/regex-emacs.c
++++ b/src/regex-emacs.c
+@@ -50,6 +50,34 @@
+ /* Explicit syntax lookup using the buffer-local table.  */
+ #define BUFFER_SYNTAX(c) syntax_property (c, 0)
+
++/* Fast-path syntax lookup: compile-time cache, runtime position guard.
++
++   Unlike the baseline variant, this version populates syntax_ascii even
++   when parse_sexp_lookup_properties is set.  The compile-time guard is
++   removed; instead, SYNTAX_TRU checks at runtime whether the current
++   buffer position has a syntax-table text property.  If so, it falls
++   back to the full SYNTAX(c) path.  If not, it uses the cached value.
++
++   This enables the optimization in buffers where parse_sexp_lookup_properties
++   is non-nil globally but where most characters lack position-specific syntax
++   overrides.  The additional cost is one call to
++   get_char_property_and_overlay() on each SYNTAX_TRU call that might have
++   a text property — typically rare in practice.
++
++   The position_has_syntax_property() helper is defined below; it returns
++   true iff the current charpos has a non-nil 'syntax-table property.  */
++
++static bool
++position_has_syntax_property (ptrdiff_t charpos)
++{
++  Lisp_Object val = Fget_text_property (make_fixnum (charpos),
++                                        Qsyntax_table, Qnil);
++  return !NILP (val);
++}
++
++#define SYNTAX_TRU_POS(c, charpos)					\
++  ((bufp->syntax_ascii_valid && (unsigned)(c) < 128			\
++    && !position_has_syntax_property (charpos))				\
++   ? (enum syntaxcode) bufp->syntax_ascii[(unsigned char)(c)]		\
++   : SYNTAX (c))
++
++/* Simple form for call sites that do not track charpos precisely.  */
++#define SYNTAX_TRU(c) SYNTAX_TRU_POS (c, PTR_TO_OFFSET (d))
++
+ #define RE_MULTIBYTE_P(bufp) ((bufp)->multibyte)
+ #define RE_TARGET_MULTIBYTE_P(bufp) ((bufp)->target_multibyte)
+ #define RE_STRING_CHAR(p, multibyte) \
+@@ -4983,12 +5017,12 @@
+ 		UPDATE_SYNTAX_TABLE (charpos);
+ 		GET_CHAR_BEFORE_2 (c1, d, string1, end1, string2, end2);
+ 		nchars++;
+-		s1 = SYNTAX (c1);
++		s1 = SYNTAX_TRU (c1);
+ 		UPDATE_SYNTAX_TABLE_FORWARD (charpos + 1);
+ 		PREFETCH_NOLIMIT ();
+ 		GET_CHAR_AFTER (c2, d, dummy);
+ 		nchars++;
+-		s2 = SYNTAX (c2);
++		s2 = SYNTAX_TRU (c2);
+
+ 		if (/* Case 2: Only one of S1 and S2 is Sword.  */
+ 		    ((s1 == Sword) != (s2 == Sword))
+@@ -5348,6 +5382,19 @@
+ 		       whitespace_regexp,
+ 		       bufp);
+
++  /* Always populate the syntax cache — the runtime guard in SYNTAX_TRU
++     handles positions with text properties.  This allows the cache to
++     be used even when parse_sexp_lookup_properties is set.  */
++  if (!ret && bufp->used_syntax)
++    {
++      for (int i = 0; i < 128; i++)
++        bufp->syntax_ascii[i] = syntax_property (i, 0);
++      bufp->syntax_ascii_valid = true;
++    }
++  else
++    bufp->syntax_ascii_valid = false;
++
+   if (!ret)
+     return NULL;
+   return re_error_msgid[ret];
+diff --git a/src/regex-emacs.h b/src/regex-emacs.h
+index bcfff662f7..0000000000 100644
+--- a/src/regex-emacs.h
++++ b/src/regex-emacs.h
+@@ -88,6 +88,16 @@
+            when it is matched.  */
+   Lisp_Object translate;
+
++        /* Flat lookup table caching the syntax code of ASCII characters
++           (0-127).  Unlike the baseline, this is populated even when
++           parse_sexp_lookup_properties is set; the SYNTAX_TRU macro
++           performs a runtime text-property check before using the cache.
++           Valid only when syntax_ascii_valid is true.  */
++  unsigned char syntax_ascii[128];
++
++        /* True iff syntax_ascii has been populated.  */
++  bool_bf syntax_ascii_valid : 1;
++
+ 	/* Number of subexpressions found by the compiler.  */
+   ptrdiff_t re_nsub;
+

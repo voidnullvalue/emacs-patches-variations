@@ -1,0 +1,37 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-translate-cache-baseline
+family: regex-translate-cache
+title: "Flat ASCII translation cache in re_pattern_buffer (compile-time eager fill, unsigned char entries)"
+llm_assisted: true
+llm_system: "Claude Code"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+design_dimensions:
+  cache_location: "per-pattern (field in re_pattern_buffer)"
+  population_strategy: "eager — entire 256-entry array filled at re_compile_pattern time"
+  validity_mechanism: "single bool_bf flag (trt_ascii_valid)"
+  guard: "!NILP(bufp->translate) — only populated when a translate table exists"
+  coverage: "0-255; entries for codes 128-255 stored via CHAR_TO_BYTE_SAFE"
+  entry_type: "unsigned char (byte value of translated character)"
+  invalidation: "recompile pattern"
+  size_bytes: 256
+dependencies: []
+conflicts:
+  - regex-syntax-cache-baseline
+  - regex-combined-cache-baseline
+expected_tradeoffs:
+  benefits:
+    - "Eliminates char_table_translate() call for ASCII in case-folding search"
+    - "Original README reports up to 50% improvement in case-folding scenarios"
+    - "256 bytes fits in 4 cache lines"
+  costs:
+    - "256 bytes added to re_pattern_buffer"
+    - "unsigned char truncates translation result — codes > 255 are mapped via CHAR_TO_BYTE_SAFE"
+    - "Only useful when a translate table is present (case-fold searches)"
+apply_status: "clean — extracted directly from archive/original/re_ascii_translate_cache_0001.patch"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

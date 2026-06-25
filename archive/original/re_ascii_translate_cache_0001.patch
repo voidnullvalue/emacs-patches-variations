@@ -1,0 +1,162 @@
+diff --git a/src/regex-emacs.c b/src/regex-emacs.c
+index d8ed8a462a..e5a9926c2a 100644
+--- a/src/regex-emacs.c
++++ b/src/regex-emacs.c
+@@ -1196,6 +1196,22 @@
+ #define RE_TRANSLATE(TBL, C) char_table_translate (TBL, C)
+ #define TRANSLATE(d) (!NILP (translate) ? RE_TRANSLATE (translate, d) : (d))
+ 
++/* Fast-path character translation using the flat ASCII cache in BUFP.
++   For characters with code < 128 we look up the pre-computed value in
++   trt_ascii (1 load, 0 branches), avoiding the expensive char-table
++   walk.  Characters with code >= 128 take the unchanged slow path
++   through char_table_translate: this is necessary because (a) for
++   multibyte buffers codes 128-255 are real Unicode code points whose
++   translation is a char code, and (b) for unibyte buffers raw bytes
++   >= 128 are translated via their 0x3FFF00+ representation, not as
++   the raw code point.  ASCII (< 128) is identical in both
++   representations, so caching it is always safe.  Assumes BUFP and TRANSLATE's assumed
++   variables (translate) are in scope.  */
++#define TRANSLATE_TRU(C)					\
++  ((bufp->trt_ascii_valid && (unsigned) (C) < 128)		\
++   ? bufp->trt_ascii[(unsigned char) (C)]				\
++   : TRANSLATE (C))
++
+ /* Macros for outputting the compiled pattern into 'buffer'.  */
+ 
+ /* If the buffer isn't allocated when it comes in, use this.  */
+@@ -3503,7 +3519,7 @@
+ 			int buf_charlen;
+ 
+ 			buf_ch = string_char_and_length (d, &buf_charlen);
+-			buf_ch = RE_TRANSLATE (translate, buf_ch);
++			buf_ch = TRANSLATE_TRU (buf_ch);
+ 			if (fastmap[CHAR_LEADING_CODE (buf_ch)])
+ 			  break;
+ 
+@@ -3515,7 +3531,7 @@
+ 		      {
+ 			buf_ch = *d;
+ 			int ch = RE_CHAR_TO_MULTIBYTE (buf_ch);
+-			int translated = RE_TRANSLATE (translate, ch);
++			int translated = TRANSLATE_TRU (ch);
+ 			if (translated != ch
+ 			    && (ch = RE_CHAR_TO_UNIBYTE (translated)) >= 0)
+ 			  buf_ch = ch;
+@@ -3552,7 +3568,7 @@
+ 	      if (multibyte)
+ 		{
+ 		  buf_ch = STRING_CHAR (d);
+-		  buf_ch = TRANSLATE (buf_ch);
++		  buf_ch = TRANSLATE_TRU (buf_ch);
+ 		  if (! fastmap[CHAR_LEADING_CODE (buf_ch)])
+ 		    goto advance;
+ 		}
+@@ -3560,11 +3576,11 @@
+ 		{
+ 		  buf_ch = *d;
+ 		  int ch = RE_CHAR_TO_MULTIBYTE (buf_ch);
+-		  int translated = TRANSLATE (ch);
++		  int translated = TRANSLATE_TRU (ch);
+ 		  if (translated != ch
+ 		      && (ch = RE_CHAR_TO_UNIBYTE (translated)) >= 0)
+ 		    buf_ch = ch;
+-		  if (! fastmap[TRANSLATE (buf_ch)])
++		  if (! fastmap[TRANSLATE_TRU (buf_ch)])
+ 		    goto advance;
+ 		}
+ 	    }
+@@ -4456,7 +4472,7 @@
+ 		  }
+ 		buf_ch = string_char_and_length (d, &buf_charlen);
+ 
+-		if (TRANSLATE (buf_ch) != pat_ch)
++		if (TRANSLATE_TRU (buf_ch) != pat_ch)
+ 		  {
+ 		    d = dfail;
+ 		    goto fail;
+@@ -4488,7 +4504,7 @@
+ 		buf_ch = RE_CHAR_TO_MULTIBYTE (*d);
+ 		if (! CHAR_BYTE8_P (buf_ch))
+ 		  {
+-		    buf_ch = TRANSLATE (buf_ch);
++		    buf_ch = TRANSLATE_TRU (buf_ch);
+ 		    buf_ch = RE_CHAR_TO_UNIBYTE (buf_ch);
+ 		    if (buf_ch < 0)
+ 		      buf_ch = *d;
+@@ -4521,7 +4537,7 @@
+ 	    PREFETCH ();
+ 	    buf_ch = RE_STRING_CHAR_AND_LENGTH (d, buf_charlen,
+ 						target_multibyte);
+-	    buf_ch = TRANSLATE (buf_ch);
++	    buf_ch = TRANSLATE_TRU (buf_ch);
+ 	    if (buf_ch == '\n')
+ 	      goto fail;
+ 
+@@ -4549,7 +4565,7 @@
+ 	      {
+ 		int c1;
+ 
+-		c = TRANSLATE (c);
++		c = TRANSLATE_TRU (c);
+ 		c1 = RE_CHAR_TO_UNIBYTE (c);
+ 		if (c1 >= 0)
+ 		  {
+@@ -4563,7 +4579,7 @@
+ 
+ 		if (! CHAR_BYTE8_P (c1))
+ 		  {
+-		    c1 = TRANSLATE (c1);
++		    c1 = TRANSLATE_TRU (c1);
+ 		    c1 = RE_CHAR_TO_UNIBYTE (c1);
+ 		    if (c1 >= 0)
+ 		      {
+@@ -5348,6 +5364,24 @@
+ 		       whitespace_regexp,
+ 		       bufp);
+ 
++  /* Populate the flat ASCII translate cache so the hot match/scan
++     loops can avoid the expensive char-table walk for single-byte
++     characters.  Multibyte characters (code > 255) always take the
++     slow path through char_table_translate, so this changes nothing
++     for non-ASCII text.  */
++  if (!ret && !NILP (bufp->translate))
++    {
++      for (int i = 0; i < 256; i++)
++	{
++	  int ch = char_table_translate (bufp->translate, i);
++	  int byte = CHAR_TO_BYTE_SAFE (ch);
++	  bufp->trt_ascii[i] = (byte >= 0 ? byte : i);
++	}
++      bufp->trt_ascii_valid = true;
++    }
++  else
++    bufp->trt_ascii_valid = false;
++
+   if (!ret)
+     return NULL;
+   return re_error_msgid[ret];
+diff --git a/src/regex-emacs.h b/src/regex-emacs.h
+index bcfff662f7..3ccb9df49e 100644
+--- a/src/regex-emacs.h
++++ b/src/regex-emacs.h
+@@ -88,6 +88,19 @@
+            when it is matched.  */
+   Lisp_Object translate;
+ 
++        /* Flat lookup table caching the ASCII (0-255) portion of the
++           translate table above, so that the hot match/scan loops can
++           avoid the expensive char-table walk for the overwhelmingly
++           common case of single-byte characters.  Valid only when
++           trt_ascii_valid is true; entries for codes >= 128 that have
++           no translation are stored as their own value (identity).
++           Multibyte characters (code > 255) always take the slow path
++           through char_table_translate.  */
++  unsigned char trt_ascii[256];
++
++        /* True iff trt_ascii has been populated from translate.  */
++  bool_bf trt_ascii_valid : 1;
++
+ 	/* Number of subexpressions found by the compiler.  */
+   ptrdiff_t re_nsub;
+ 

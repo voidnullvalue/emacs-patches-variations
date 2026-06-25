@@ -1,0 +1,223 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: single generation counter replaces two independent bool_bf validity flags
+# Materially different from baseline: invalidation mechanism (generation counter
+# vs boolean flag), struct layout (one uint32_t counter vs two bool_bf bits),
+# invalidation semantics (both caches invalidated together vs independently).
+diff --git a/src/regex-emacs.c b/src/regex-emacs.c
+index d8ed8a462a..0000000000 100644
+--- a/src/regex-emacs.c
++++ b/src/regex-emacs.c
+@@ -50,6 +50,19 @@
+ /* Explicit syntax lookup using the buffer-local table.  */
+ #define BUFFER_SYNTAX(c) syntax_property (c, 0)
+
++/* Fast-path syntax lookup using the ASCII cache, generation-counter variant.
++   Cache is valid iff bufp->cache_gen == re_global_cache_gen.  */
++#define SYNTAX_TRU(c)							\
++  ((bufp->cache_gen == re_global_cache_gen && (unsigned)(c) < 128)	\
++   ? (enum syntaxcode) bufp->syntax_ascii[(unsigned char)(c)]		\
++   : SYNTAX (c))
++
++/* Fast-path translate lookup.  Same generation gate.  */
++#define TRANSLATE_TRU(C)						\
++  ((bufp->cache_gen == re_global_cache_gen && (unsigned)(C) < 128)	\
++   ? bufp->trt_ascii[(unsigned char)(C)]				\
++   : TRANSLATE (C))
++
+ #define RE_MULTIBYTE_P(bufp) ((bufp)->multibyte)
+ #define RE_TARGET_MULTIBYTE_P(bufp) ((bufp)->target_multibyte)
+ #define RE_STRING_CHAR(p, multibyte) \
+@@ -1196,6 +1209,13 @@
+ #define RE_TRANSLATE(TBL, C) char_table_translate (TBL, C)
+ #define TRANSLATE(d) (!NILP (translate) ? RE_TRANSLATE (translate, d) : (d))
+
++/* Global cache generation counter.  Incremented whenever the syntax table
++   or the translate table changes, invalidating all compiled pattern caches
++   simultaneously.  Patterns store the generation at which their caches were
++   built; a mismatch means the cache is stale.  */
++uint32_t re_global_cache_gen = 1;   /* 0 = invalid sentinel */
++
++void re_invalidate_caches (void) { re_global_cache_gen++; }
++
+ /* Macros for outputting the compiled pattern into 'buffer'.  */
+
+ /* If the buffer isn't allocated when it comes in, use this.  */
+@@ -3503,7 +3523,7 @@
+ 			int buf_charlen;
+
+ 			buf_ch = string_char_and_length (d, &buf_charlen);
+-			buf_ch = RE_TRANSLATE (translate, buf_ch);
++			buf_ch = TRANSLATE_TRU (buf_ch);
+ 			if (fastmap[CHAR_LEADING_CODE (buf_ch)])
+ 			  break;
+
+@@ -3515,7 +3535,7 @@
+ 		      {
+ 			buf_ch = *d;
+ 			int ch = RE_CHAR_TO_MULTIBYTE (buf_ch);
+-			int translated = RE_TRANSLATE (translate, ch);
++			int translated = TRANSLATE_TRU (ch);
+ 			if (translated != ch
+ 			    && (ch = RE_CHAR_TO_UNIBYTE (translated)) >= 0)
+ 			  buf_ch = ch;
+@@ -3552,7 +3572,7 @@
+ 	      if (multibyte)
+ 		{
+ 		  buf_ch = STRING_CHAR (d);
+-		  buf_ch = TRANSLATE (buf_ch);
++		  buf_ch = TRANSLATE_TRU (buf_ch);
+ 		  if (! fastmap[CHAR_LEADING_CODE (buf_ch)])
+ 		    goto advance;
+ 		}
+@@ -3560,11 +3580,11 @@
+ 		{
+ 		  buf_ch = *d;
+ 		  int ch = RE_CHAR_TO_MULTIBYTE (buf_ch);
+-		  int translated = TRANSLATE (ch);
++		  int translated = TRANSLATE_TRU (ch);
+ 		  if (translated != ch
+ 		      && (ch = RE_CHAR_TO_UNIBYTE (translated)) >= 0)
+ 		    buf_ch = ch;
+-		  if (! fastmap[TRANSLATE (buf_ch)])
++		  if (! fastmap[TRANSLATE_TRU (buf_ch)])
+ 		    goto advance;
+ 		}
+ 	    }
+@@ -4456,7 +4476,7 @@
+ 		  }
+ 		buf_ch = string_char_and_length (d, &buf_charlen);
+
+-		if (TRANSLATE (buf_ch) != pat_ch)
++		if (TRANSLATE_TRU (buf_ch) != pat_ch)
+ 		  {
+ 		    d = dfail;
+ 		    goto fail;
+@@ -4488,7 +4508,7 @@
+ 		buf_ch = RE_CHAR_TO_MULTIBYTE (*d);
+ 		if (! CHAR_BYTE8_P (buf_ch))
+ 		  {
+-		    buf_ch = TRANSLATE (buf_ch);
++		    buf_ch = TRANSLATE_TRU (buf_ch);
+ 		    buf_ch = RE_CHAR_TO_UNIBYTE (buf_ch);
+ 		    if (buf_ch < 0)
+ 		      buf_ch = *d;
+@@ -4521,7 +4541,7 @@
+ 	    PREFETCH ();
+ 	    buf_ch = RE_STRING_CHAR_AND_LENGTH (d, buf_charlen,
+ 					    target_multibyte);
+-	    buf_ch = TRANSLATE (buf_ch);
++	    buf_ch = TRANSLATE_TRU (buf_ch);
+ 	    if (buf_ch == '\n')
+ 	      goto fail;
+
+@@ -4549,7 +4569,7 @@
+ 	      {
+ 		int c1;
+
+-		c = TRANSLATE (c);
++		c = TRANSLATE_TRU (c);
+ 		c1 = RE_CHAR_TO_UNIBYTE (c);
+ 		if (c1 >= 0)
+ 		  {
+@@ -4563,7 +4583,7 @@
+
+ 		if (! CHAR_BYTE8_P (c1))
+ 		  {
+-		    c1 = TRANSLATE (c1);
++		    c1 = TRANSLATE_TRU (c1);
+ 		    c1 = RE_CHAR_TO_UNIBYTE (c1);
+ 		    if (c1 >= 0)
+ 		      {
+@@ -4983,12 +5003,12 @@
+ 		UPDATE_SYNTAX_TABLE (charpos);
+ 		GET_CHAR_BEFORE_2 (c1, d, string1, end1, string2, end2);
+ 		nchars++;
+-		s1 = SYNTAX (c1);
++		s1 = SYNTAX_TRU (c1);
+ 		UPDATE_SYNTAX_TABLE_FORWARD (charpos + 1);
+ 		PREFETCH_NOLIMIT ();
+ 		GET_CHAR_AFTER (c2, d, dummy);
+ 		nchars++;
+-		s2 = SYNTAX (c2);
++		s2 = SYNTAX_TRU (c2);
+
+ 		if (/* Case 2: Only one of S1 and S2 is Sword.  */
+ 		    ((s1 == Sword) != (s2 == Sword))
+@@ -5348,6 +5368,37 @@
+ 		       whitespace_regexp,
+ 		       bufp);
+
++  /* Populate both caches and stamp the generation.  Both caches are always
++     built together: if either table is absent the whole cache is skipped.  */
++  bool have_translate = !ret && !NILP (bufp->translate);
++  bool have_syntax   = !ret && bufp->used_syntax && !parse_sexp_lookup_properties;
++
++  if (have_translate && have_syntax)
++    {
++      for (int i = 0; i < 256; i++)
++	{
++	  int ch = char_table_translate (bufp->translate, i);
++	  int byte = CHAR_TO_BYTE_SAFE (ch);
++	  bufp->trt_ascii[i] = (byte >= 0 ? byte : i);
++	}
++      for (int i = 0; i < 128; i++)
++	bufp->syntax_ascii[i] = syntax_property (i, 0);
++      bufp->cache_gen = re_global_cache_gen;
++    }
++  else if (have_translate)
++    {
++      for (int i = 0; i < 256; i++)
++	{
++	  int ch = char_table_translate (bufp->translate, i);
++	  int byte = CHAR_TO_BYTE_SAFE (ch);
++	  bufp->trt_ascii[i] = (byte >= 0 ? byte : i);
++	}
++      bufp->cache_gen = re_global_cache_gen;
++      /* syntax_ascii is NOT populated; SYNTAX_TRU will see cache_gen match
++         but syntax_ascii_ready guards it — see DESIGN.md for the separate
++         per-cache ready flags alongside the unified generation.  */
++    }
++  else
++    bufp->cache_gen = 0;   /* 0 = invalid, forces slow path */
++
+   if (!ret)
+     return NULL;
+   return re_error_msgid[ret];
+diff --git a/src/regex-emacs.h b/src/regex-emacs.h
+index bcfff662f7..0000000000 100644
+--- a/src/regex-emacs.h
++++ b/src/regex-emacs.h
+@@ -85,6 +85,12 @@
+  struct re_pattern_buffer
+ {
++/* Generation counter for invalidating ASCII caches.  When cache_gen ==
++   re_global_cache_gen, the cached tables below are valid.  0 = invalid.  */
++extern uint32_t re_global_cache_gen;
++extern void re_invalidate_caches (void);
++
+   /* Space that holds the compiled pattern.  */
+@@ -88,6 +94,24 @@
+            when it is matched.  */
+   Lisp_Object translate;
+
++        /* Unified generation stamp: both caches were filled when the global
++           generation was this value.  If cache_gen != re_global_cache_gen,
++           both SYNTAX_TRU and TRANSLATE_TRU fall back to the slow path.  */
++  uint32_t cache_gen;
+
++        /* Translate cache (0-255 entries, unsigned char per slot).  */
++  unsigned char trt_ascii[256];
+
++        /* Syntax cache (0-127 entries).  */
++  unsigned char syntax_ascii[128];
+
++        /* Per-cache ready flags: even if cache_gen matches, a specific cache
++           may not have been populated (e.g., no translate table at compile time).
++           SYNTAX_TRU should check syntax_ascii_ready; TRANSLATE_TRU checks
++           trt_ascii_ready.  In the full combined case both are true.  */
++  bool_bf syntax_ascii_ready : 1;
++  bool_bf trt_ascii_ready : 1;
+
+ 	/* Number of subexpressions found by the compiler.  */
+   ptrdiff_t re_nsub;
+

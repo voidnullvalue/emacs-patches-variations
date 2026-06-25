@@ -1,0 +1,110 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: per-frame NSColor cache stored on EmacsView
+# Materially different from baseline: lifetime model (frame vs process),
+# invalidation trigger (frame deletion vs never), cache location (on view
+# object vs global arrays), data structure (NSMutableDictionary vs flat array).
+diff --git a/src/nsterm.m b/src/nsterm.m
+index a7f3fc292c..0000000000 100644
+--- a/src/nsterm.m
++++ b/src/nsterm.m
+@@ -151,6 +151,30 @@
+
+ /* ==========================================================================
+
++   NSColor cache — per-frame variant.
++
++   ========================================================================== */
++/* Each EmacsView carries its own NSMutableDictionary mapping @(pixel) → NSColor.
++
++   Motivation: frames may have different color profiles or display configurations.
++   A global cache conflates colors across frames; if a frame is on a P3 display
++   and another is on an sRGB display, the same pixel value yields different
++   perceptual colors.  Per-frame caches keep the color objects associated with
++   the frame that created them and are released when the frame is deallocated.
++
++   Trade-offs:
++   - Correctness: each frame's colors are isolated.
++   - Memory: proportional to the number of open frames × distinct colors.
++   - Overhead: NSMutableDictionary lookup is slower than a direct-mapped array
++     but still far cheaper than NSColor colorspace conversion.
++   - Invalidation: cache is released automatically when the view is deallocated;
++     no explicit invalidation needed on frame close.
++
++   The cache is accessed only from the main thread (NS drawing invariant).  */
++
++static NSColor *
++ns_frame_color_lookup (EmacsView *view, unsigned long key)
++{
++  return [view->colorCache objectForKey: @(key)];
++}
++
++static NSColor *
++ns_frame_color_store (EmacsView *view, unsigned long key, NSColor *col)
++{
++  if (view->colorCache == nil)
++    view->colorCache = [[NSMutableDictionary alloc] initWithCapacity: 64];
++  [view->colorCache setObject: col forKey: @(key)];
++  return col;
++}
++
++
++/* ==========================================================================
++
+    NSColor, EmacsColor category.
+
+    ========================================================================== */
+@@ -184,12 +218,20 @@
+
+ + (NSColor *)colorWithUnsignedLong:(unsigned long)c
+ {
++  /* Per-frame cache: look up via the current drawing view.  */
++  EmacsView *view = (EmacsView *) [NSView focusView];
++  if (view != nil && [view isKindOfClass: [EmacsView class]])
++    {
++      NSColor *cached = ns_frame_color_lookup (view, c);
++      if (cached != nil)
++        return cached;
++    }
++
+   EmacsCGFloat a = (double)((c >> 24) & 0xff) / 255.0;
+   EmacsCGFloat r = (double)((c >> 16) & 0xff) / 255.0;
+   EmacsCGFloat g = (double)((c >> 8) & 0xff) / 255.0;
+   EmacsCGFloat b = (double)(c & 0xff) / 255.0;
+
+-  return [NSColor colorForEmacsRed:r green:g blue:b alpha:a];
++  NSColor *col = [NSColor colorForEmacsRed:r green:g blue:b alpha:a];
++  if (view != nil && [view isKindOfClass: [EmacsView class]])
++    return ns_frame_color_store (view, c, col);
++  return col;
+ }
+
+ - (unsigned long)unsignedLong
+@@ -890,6 +932,7 @@ ns_term_init (struct ns_display_info *dpyinfo)
+ /* EmacsView ivar initialization.  */
+ - (instancetype)initWithFrame:(NSRect)frameRect
+ {
++  colorCache = nil;
+   return [super initWithFrame: frameRect];
+ }
+@@ -910,6 +954,8 @@ ns_term_init (struct ns_display_info *dpyinfo)
+
+ - (void)dealloc
+ {
++  [colorCache release];
++  colorCache = nil;
+   [super dealloc];
+ }
+diff --git a/src/nsterm.h b/src/nsterm.h
+index 0000000000..0000000000 100644
+--- a/src/nsterm.h
++++ b/src/nsterm.h
+@@ -320,6 +320,9 @@ typedef id instancetype;
+ @interface EmacsView : NSView <NSTextInput>
+ {
+   struct frame *emacsframe;
++  /* Per-frame NSColor cache: pixel → NSColor.  Allocated lazily.
++     Released in -dealloc.  */
++  NSMutableDictionary *colorCache;
+   char *old_title;
+   BOOL win_is_being_destroyed;
+   BOOL rows_at_once;

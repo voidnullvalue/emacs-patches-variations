@@ -1,0 +1,39 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-combined-cache-unified-generation
+family: regex-combined-cache
+title: "Combined cache with unified uint32_t generation counter invalidation"
+llm_assisted: true
+llm_system: "Claude Code"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+design_dimensions:
+  cache_location: "per-pattern (re_pattern_buffer)"
+  invalidation: "global uint32_t re_global_cache_gen counter; per-pattern cache_gen field"
+  validity_mechanism: "generation counter comparison (cache_gen == re_global_cache_gen)"
+  components: ["trt_ascii[256]", "syntax_ascii[128]", "per-cache ready bits"]
+  population_strategy: "eager at re_compile_pattern"
+  invalidation_trigger: "re_invalidate_caches() call from syntax/translate mutation sites"
+  global_state: "re_global_cache_gen (uint32_t, defined in regex-emacs.c)"
+dependencies:
+  - "re_invalidate_caches() must be called from all syntax table and translate table mutation sites"
+conflicts:
+  - regex-combined-cache-baseline
+  - regex-combined-cache-search-path-hook
+expected_tradeoffs:
+  benefits:
+    - "Single invalidation point: bump re_global_cache_gen to invalidate all compiled patterns"
+    - "No recompile required for invalidation"
+    - "Generation counter comparison is a single load + compare (same cost as bool check)"
+    - "Cleaner invalidation model: one call to re_invalidate_caches() suffices"
+  costs:
+    - "Requires modifying syntax table and translate table mutation sites to call re_invalidate_caches()"
+    - "Global state couples all compiled patterns; one invalidation affects all patterns simultaneously"
+    - "uint32_t generation wraps at 2^32; wrap causes all patterns to require rebuild"
+    - "Per-cache ready bits alongside generation counter adds complexity"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

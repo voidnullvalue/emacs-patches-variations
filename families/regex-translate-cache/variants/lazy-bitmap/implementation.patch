@@ -1,0 +1,183 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: lazy per-entry populate with 256-bit valid bitmap
+# Materially different from baseline: population is lazy (on first access
+# rather than eager at compile time), validity is tracked per-entry with a
+# 256-bit bitmap rather than a single bool for the whole table.
+diff --git a/src/regex-emacs.c b/src/regex-emacs.c
+index d8ed8a462a..0000000000 100644
+--- a/src/regex-emacs.c
++++ b/src/regex-emacs.c
+@@ -1196,6 +1196,51 @@
+ #define RE_TRANSLATE(TBL, C) char_table_translate (TBL, C)
+ #define TRANSLATE(d) (!NILP (translate) ? RE_TRANSLATE (translate, d) : (d))
+
++/* Lazy-populate translation cache using a per-entry 256-bit valid bitmap.
++
++   Instead of filling all 256 entries at compile time, this variant fills
++   each entry on first access.  A 256-bit bitmap (32 bytes of unsigned char)
++   tracks which entries have been populated.
++
++   Benefits:
++   - Only computes translations for characters actually encountered during matching.
++   - Amortizes the compile-time cost for patterns that access few distinct chars.
++
++   Costs:
++   - Bitmap check (bit test) on every TRANSLATE_TRU call.
++   - Lazy fill is not re-entrant; must only be called from single-threaded context.
++   - Valid bitmap adds 32 bytes to re_pattern_buffer.
++
++   trt_bitmap_valid is still a single bool: it is set once (when the translate
++   table is non-nil and we decide to use the lazy cache) and stays set for
++   the pattern's lifetime.  Individual bit entries in trt_bitmap mark which
++   slots have been filled.  */
++
++/* Test bit I in the 32-byte bitmap field of BUFP.  */
++#define TRT_BIT_TEST(bufp, i) \
++  ((bufp)->trt_bitmap[(unsigned)(i) >> 3] & (1u << ((unsigned)(i) & 7)))
++
++/* Set bit I in the bitmap and fill the entry from the translate table.  */
++#define TRT_BIT_FILL(bufp, i)						\
++  do {									\
++    int _ch = char_table_translate ((bufp)->translate, (i));		\
++    int _byte = CHAR_TO_BYTE_SAFE (_ch);				\
++    (bufp)->trt_ascii[(unsigned char)(i)] = (_byte >= 0 ? _byte : (i)); \
++    (bufp)->trt_bitmap[(unsigned)(i) >> 3] |= (1u << ((unsigned)(i) & 7)); \
++  } while (0)
++
++/* Fast-path: if entry I is populated, return it; else populate and return.  */
++#define TRANSLATE_TRU(C)						\
++  ((bufp->trt_bitmap_valid && (unsigned)(C) < 128)			\
++   ? (TRT_BIT_TEST (bufp, (C))					\
++      ? bufp->trt_ascii[(unsigned char)(C)]				\
++      : (TRT_BIT_FILL (bufp, (C)),					\
++         bufp->trt_ascii[(unsigned char)(C)]))				\
++   : TRANSLATE (C))
++
+ /* Macros for outputting the compiled pattern into 'buffer'.  */
+
+ /* If the buffer isn't allocated when it comes in, use this.  */
+@@ -3503,7 +3549,7 @@
+ 			int buf_charlen;
+
+ 			buf_ch = string_char_and_length (d, &buf_charlen);
+-			buf_ch = RE_TRANSLATE (translate, buf_ch);
++			buf_ch = TRANSLATE_TRU (buf_ch);
+ 			if (fastmap[CHAR_LEADING_CODE (buf_ch)])
+ 			  break;
+
+@@ -3515,7 +3561,7 @@
+ 		      {
+ 			buf_ch = *d;
+ 			int ch = RE_CHAR_TO_MULTIBYTE (buf_ch);
+-			int translated = RE_TRANSLATE (translate, ch);
++			int translated = TRANSLATE_TRU (ch);
+ 			if (translated != ch
+ 			    && (ch = RE_CHAR_TO_UNIBYTE (translated)) >= 0)
+ 			  buf_ch = ch;
+@@ -3552,7 +3598,7 @@
+ 	      if (multibyte)
+ 		{
+ 		  buf_ch = STRING_CHAR (d);
+-		  buf_ch = TRANSLATE (buf_ch);
++		  buf_ch = TRANSLATE_TRU (buf_ch);
+ 		  if (! fastmap[CHAR_LEADING_CODE (buf_ch)])
+ 		    goto advance;
+ 		}
+@@ -3560,11 +3606,11 @@
+ 		{
+ 		  buf_ch = *d;
+ 		  int ch = RE_CHAR_TO_MULTIBYTE (buf_ch);
+-		  int translated = TRANSLATE (ch);
++		  int translated = TRANSLATE_TRU (ch);
+ 		  if (translated != ch
+ 		      && (ch = RE_CHAR_TO_UNIBYTE (translated)) >= 0)
+ 		    buf_ch = ch;
+-		  if (! fastmap[TRANSLATE (buf_ch)])
++		  if (! fastmap[TRANSLATE_TRU (buf_ch)])
+ 		    goto advance;
+ 		}
+ 	    }
+@@ -4456,7 +4502,7 @@
+ 		  }
+ 		buf_ch = string_char_and_length (d, &buf_charlen);
+
+-		if (TRANSLATE (buf_ch) != pat_ch)
++		if (TRANSLATE_TRU (buf_ch) != pat_ch)
+ 		  {
+ 		    d = dfail;
+ 		    goto fail;
+@@ -4488,7 +4534,7 @@
+ 		buf_ch = RE_CHAR_TO_MULTIBYTE (*d);
+ 		if (! CHAR_BYTE8_P (buf_ch))
+ 		  {
+-		    buf_ch = TRANSLATE (buf_ch);
++		    buf_ch = TRANSLATE_TRU (buf_ch);
+ 		    buf_ch = RE_CHAR_TO_UNIBYTE (buf_ch);
+ 		    if (buf_ch < 0)
+ 		      buf_ch = *d;
+@@ -4521,7 +4567,7 @@
+ 	    PREFETCH ();
+ 	    buf_ch = RE_STRING_CHAR_AND_LENGTH (d, buf_charlen,
+ 					    target_multibyte);
+-	    buf_ch = TRANSLATE (buf_ch);
++	    buf_ch = TRANSLATE_TRU (buf_ch);
+ 	    if (buf_ch == '\n')
+ 	      goto fail;
+
+@@ -4549,7 +4595,7 @@
+ 	      {
+ 		int c1;
+
+-		c = TRANSLATE (c);
++		c = TRANSLATE_TRU (c);
+ 		c1 = RE_CHAR_TO_UNIBYTE (c);
+ 		if (c1 >= 0)
+ 		  {
+@@ -4563,7 +4609,7 @@
+
+ 		if (! CHAR_BYTE8_P (c1))
+ 		  {
+-		    c1 = TRANSLATE (c1);
++		    c1 = TRANSLATE_TRU (c1);
+ 		    c1 = RE_CHAR_TO_UNIBYTE (c1);
+ 		    if (c1 >= 0)
+ 		      {
+@@ -5348,6 +5394,17 @@
+ 		       whitespace_regexp,
+ 		       bufp);
+
++  /* Initialize lazy translate cache: zero the bitmap and set the
++     valid flag.  Entries are filled on first access by TRANSLATE_TRU.  */
++  if (!ret && !NILP (bufp->translate))
++    {
++      memset (bufp->trt_bitmap, 0, sizeof bufp->trt_bitmap);
++      bufp->trt_bitmap_valid = true;
++    }
++  else
++    bufp->trt_bitmap_valid = false;
++
+   if (!ret)
+     return NULL;
+   return re_error_msgid[ret];
+diff --git a/src/regex-emacs.h b/src/regex-emacs.h
+index bcfff662f7..0000000000 100644
+--- a/src/regex-emacs.h
++++ b/src/regex-emacs.h
+@@ -88,6 +88,23 @@
+            when it is matched.  */
+   Lisp_Object translate;
+
++        /* Lazy translation cache: entries filled on first access.  */
++  unsigned char trt_ascii[256];
++
++        /* 256-bit bitmap: bit I is set iff trt_ascii[I] has been filled.
++           32 bytes (256 bits / 8 bits per byte).  */
++  unsigned char trt_bitmap[32];
++
++        /* True iff the lazy cache is in use (translate table is non-nil).
++           Individual slot validity is tracked by trt_bitmap, not this flag.  */
++  bool_bf trt_bitmap_valid : 1;
++
+ 	/* Number of subexpressions found by the compiler.  */
+   ptrdiff_t re_nsub;
+

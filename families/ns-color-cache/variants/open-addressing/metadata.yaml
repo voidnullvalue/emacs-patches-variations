@@ -1,0 +1,40 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: ns-color-cache-open-addressing
+family: ns-color-cache
+title: "NSColor open-addressing hash table (linear probing, generation-based eviction, 512 slots)"
+llm_assisted: true
+llm_system: "Claude Code"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/nsterm.m: a7f3fc292c"
+files_modified:
+  - src/nsterm.m
+design_dimensions:
+  cache_structure: "open-addressing hash table with linear probing"
+  hash_function: "Fibonacci multiplicative"
+  cache_size: 512
+  probe_depth: 8
+  eviction_policy: "overwrite oldest (minimum generation stamp) when probe window full"
+  lifetime: "process lifetime"
+  scope: "global"
+  thread_safety: "none required"
+  key_type: "unsigned long"
+  value_type: "NSColor* (retained)"
+dependencies: []
+conflicts:
+  - ns-color-cache-baseline
+  - ns-color-cache-per-frame
+  - ns-color-cache-counted-lru
+expected_tradeoffs:
+  benefits:
+    - "Finds colliding keys (baseline silently misses after one collision)"
+    - "Much smaller table: ~512 * 32 bytes = ~16 KB vs ~786 KB baseline"
+    - "Overwrite eviction prevents unbounded memory growth for pathological key sets"
+  costs:
+    - "Up to 8 iterations per lookup (vs 1 for baseline)"
+    - "Eviction releases retained NSColor objects (release call overhead)"
+    - "Generation counter adds 8 bytes per slot (vs 0 in baseline)"
+    - "More complex insertion logic"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

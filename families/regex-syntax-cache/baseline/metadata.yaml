@@ -1,0 +1,38 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-syntax-cache-baseline
+family: regex-syntax-cache
+title: "Flat ASCII syntax lookup cache in re_pattern_buffer (compile-time eager fill)"
+llm_assisted: true
+llm_system: "Claude Code"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+design_dimensions:
+  cache_location: "per-pattern (field in re_pattern_buffer)"
+  population_strategy: "eager — entire 128-entry array filled at re_compile_pattern time"
+  validity_mechanism: "single bool_bf flag (syntax_ascii_valid)"
+  guard: "!parse_sexp_lookup_properties — disabled when syntax properties may vary by position"
+  coverage: "ASCII (0-127) only; code >= 128 always takes slow path"
+  entry_type: "unsigned char (syntax code value)"
+  invalidation: "recompile pattern (Emacs's existing compile_pattern invalidation in search.c)"
+  size_bytes: 128
+dependencies: []
+conflicts:
+  - regex-translate-cache-baseline
+  - regex-combined-cache-baseline
+expected_tradeoffs:
+  benefits:
+    - "Eliminates char-table walk for ASCII characters in syntax-checking opcodes"
+    - "1 array load replaces function call chain for every SYNTAX() macro in hot loops"
+    - "128-byte table fits in a single cache line group"
+    - "Original README reports ~20% improvement in font-lock scenarios"
+  costs:
+    - "128 bytes added to re_pattern_buffer (small but nonzero struct growth)"
+    - "Guard disables optimization when parse_sexp_lookup_properties is set"
+    - "Recompile required on syntax table change (already required by Emacs)"
+apply_status: "reconstructed — see AUDIT.md Note 1; line numbers are approximations"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

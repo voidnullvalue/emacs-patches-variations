@@ -1,0 +1,38 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: malloc-pressure-relief-adaptive-threshold
+family: malloc-pressure-relief
+title: "Malloc-zone pressure relief with EMA-adaptive freed-bytes threshold"
+llm_assisted: true
+llm_system: "Claude Code"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/alloc.c: 5fc166dbc2"
+files_modified:
+  - src/alloc.c
+design_dimensions:
+  timing: "synchronous — end of garbage_collect()"
+  trigger_policy: "adaptive: freed_bytes >= adaptive_threshold (updated after each compaction)"
+  threshold_algorithm: "exponential moving average (EMA, alpha=0.25) of bytes released per compaction"
+  threshold_clamp: "[EMA*0.5, EMA*4.0], floor at 256 KB"
+  rate_limit: "minimum 3 seconds between compactions"
+  periodic_fallback: "every 64 GCs (counter resets after periodic fire)"
+  initial_threshold_bytes: 4194304
+  platform: "macOS only"
+dependencies: []
+conflicts:
+  - malloc-pressure-relief-baseline
+  - malloc-pressure-relief-background-dispatch
+expected_tradeoffs:
+  benefits:
+    - "Self-tunes: low-yield workloads automatically compact less frequently"
+    - "High-yield workloads compact more aggressively (threshold lowers)"
+    - "No manual tuning of MEMORY_COMPACT_FREED_THRESHOLD constant"
+    - "EMA tracks trend rather than reacting to single-GC anomalies"
+  costs:
+    - "Additional state: EMA accumulator, threshold variable"
+    - "Threshold oscillates on highly variable workloads"
+    - "Integer arithmetic for EMA avoids float but introduces fixed-point rounding"
+    - "Harder to reason about without profiling the adaptive_threshold value"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

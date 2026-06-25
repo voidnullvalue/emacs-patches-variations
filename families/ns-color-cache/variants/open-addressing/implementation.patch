@@ -1,0 +1,124 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: open-addressing hash table with bounded linear probing and overwrite-on-depth
+# Materially different from baseline: collision resolution strategy (linear probing
+# vs silent miss), bounded probe depth with overwrite-on-evict, smaller table (512 slots).
+diff --git a/src/nsterm.m b/src/nsterm.m
+index a7f3fc292c..0000000000 100644
+--- a/src/nsterm.m
++++ b/src/nsterm.m
+@@ -151,6 +151,86 @@
+
+ /* ==========================================================================
+
++   NSColor cache (open-addressing variant).
++
++   ========================================================================== */
++/* Open-addressing hash table for NSColor objects keyed by packed pixel.
++
++   Unlike the direct-mapped baseline, this table uses linear probing to
++   resolve hash collisions: a lookup probes up to NS_COLOR_CACHE_PROBE_MAX
++   consecutive slots before giving up.  On insertion, if all probe slots are
++   occupied by distinct keys, the oldest slot in the probe window is overwritten
++   (approximate LRU via a per-slot "generation" stamp).
++
++   Tradeoffs vs baseline:
++   - Hits on colliding keys are found (baseline silently misses them).
++   - Smaller table (512 slots, ~12 KB) vs baseline (~786 KB).
++   - Slightly more work per lookup (up to PROBE_MAX iterations).
++   - Overwrite eviction reclaims memory for evicted colors.
++
++   Drawing always happens on the main thread; no locking needed.  */
++
++#define NS_COLOR_CACHE_SIZE      512   /* must be power of 2 */
++#define NS_COLOR_CACHE_PROBE_MAX   8   /* max linear probe distance */
++
++typedef struct {
++  NSColor      *color;
++  unsigned long key;
++  uintmax_t     gen;   /* insertion generation stamp for eviction */
++} NsColorEntry;
++
++static NsColorEntry ns_color_table[NS_COLOR_CACHE_SIZE];
++static uintmax_t    ns_color_gen;   /* monotone counter */
++
++static NSUInteger
++ns_color_slot (unsigned long key)
++{
++  return (NSUInteger) ((key * 11400714819323198485ULL)
++                       & (NS_COLOR_CACHE_SIZE - 1));
++}
++
++static NSColor *
++ns_color_lookup (unsigned long key)
++{
++  NSUInteger base = ns_color_slot (key);
++  for (int d = 0; d < NS_COLOR_CACHE_PROBE_MAX; d++)
++    {
++      NSUInteger i = (base + d) & (NS_COLOR_CACHE_SIZE - 1);
++      if (ns_color_table[i].color == nil)
++        break;   /* empty slot — key absent */
++      if (ns_color_table[i].key == key)
++        return ns_color_table[i].color;
++    }
++  return nil;
++}
++
++static NSColor *
++ns_color_insert (unsigned long key, NSColor *col)
++{
++  NSUInteger base = ns_color_slot (key);
++  NSUInteger evict = base;          /* slot to overwrite if probe full */
++  uintmax_t  evict_gen = UINTMAX_MAX;
++
++  for (int d = 0; d < NS_COLOR_CACHE_PROBE_MAX; d++)
++    {
++      NSUInteger i = (base + d) & (NS_COLOR_CACHE_SIZE - 1);
++      if (ns_color_table[i].color == nil)
++        {
++          /* Empty slot — insert here.  */
++          ns_color_table[i].color = [col retain];
++          ns_color_table[i].key   = key;
++          ns_color_table[i].gen   = ++ns_color_gen;
++          return ns_color_table[i].color;
++        }
++      /* Track oldest slot for eviction.  */
++      if (ns_color_table[i].gen < evict_gen)
++        {
++          evict_gen = ns_color_table[i].gen;
++          evict     = i;
++        }
++    }
++
++  /* Probe window full — overwrite oldest entry.  */
++  [ns_color_table[evict].color release];
++  ns_color_table[evict].color = [col retain];
++  ns_color_table[evict].key   = key;
++  ns_color_table[evict].gen   = ++ns_color_gen;
++  return ns_color_table[evict].color;
++}
++
++
++/* ==========================================================================
++
+    NSColor, EmacsColor category.
+
+    ========================================================================== */
+@@ -184,12 +264,17 @@
+
+ + (NSColor *)colorWithUnsignedLong:(unsigned long)c
+ {
++  NSColor *cached = ns_color_lookup (c);
++  if (cached != nil)
++    return cached;
++
+   EmacsCGFloat a = (double)((c >> 24) & 0xff) / 255.0;
+   EmacsCGFloat r = (double)((c >> 16) & 0xff) / 255.0;
+   EmacsCGFloat g = (double)((c >> 8) & 0xff) / 255.0;
+   EmacsCGFloat b = (double)(c & 0xff) / 255.0;
+
+-  return [NSColor colorForEmacsRed:r green:g blue:b alpha:a];
++  NSColor *col = [NSColor colorForEmacsRed:r green:g blue:b alpha:a];
++  return ns_color_insert (c, col);
+ }
+
+ - (unsigned long)unsignedLong

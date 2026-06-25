@@ -1,0 +1,35 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: malloc-pressure-relief-baseline
+family: malloc-pressure-relief
+title: "Malloc-zone pressure relief after GC (time-gated, threshold-gated, every-N fallback)"
+llm_assisted: true
+llm_system: "Claude Code"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/alloc.c: 5fc166dbc2"
+files_modified:
+  - src/alloc.c
+design_dimensions:
+  trigger_policy: "freed_bytes >= 4MB OR every 64 GCs (whichever comes first)"
+  timing: "synchronous — called at end of garbage_collect() before post-gc-hook"
+  rate_limit: "minimum 3 seconds between consecutive compactions"
+  zone_scope: "NULL (all malloc zones via malloc_zone_pressure_relief API)"
+  thresholds: "static constants (MEMORY_COMPACT_FREED_THRESHOLD, MEMORY_COMPACT_EVERY_N_GCS, MEMORY_COMPACT_MIN_INTERVAL_SECS)"
+  platform: "macOS only (#ifdef HAVE_MALLOC_MALLOC_H)"
+  statistics: "file-static counters (memory_compacts_done, memory_compact_bytes_returned)"
+dependencies: []
+conflicts:
+  - malloc-pressure-relief-background-dispatch
+expected_tradeoffs:
+  benefits:
+    - "Reduces RSS ratchet effect in long sessions"
+    - "Improves cache locality by returning fully-free pages"
+    - "Uses documented public API (available since macOS 10.7)"
+    - "Zero cost on Linux/Windows (ifdef-guarded)"
+  costs:
+    - "Synchronous arena walk adds latency to some GCs"
+    - "Static thresholds may not suit all workloads"
+    - "malloc_zone_pressure_relief cannot relocate live objects (no internal fragmentation relief)"
+apply_status: "clean — extracted directly from archive/original/memory_compact_0001.patch"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

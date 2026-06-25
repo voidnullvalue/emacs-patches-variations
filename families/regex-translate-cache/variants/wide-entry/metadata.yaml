@@ -1,0 +1,39 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-translate-cache-wide-entry
+family: regex-translate-cache
+title: "16-bit entry translate cache covering 0-255 without CHAR_TO_BYTE_SAFE truncation"
+llm_assisted: true
+llm_system: "Claude Code"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+design_dimensions:
+  cache_location: "per-pattern (re_pattern_buffer)"
+  population_strategy: "eager — all 256 entries at compile time"
+  validity_mechanism: "single bool_bf flag (trt16_valid)"
+  coverage: "0-255 (full extended ASCII); codes > 0xFFFE stored as 0xFFFF sentinel"
+  entry_type: "uint16_t (actual char code, not CHAR_TO_BYTE_SAFE result)"
+  fast_path_range: "0-255 (vs 0-127 in baseline)"
+  size_bytes: 512
+dependencies:
+  - "stdint.h (uint16_t)"
+conflicts:
+  - regex-translate-cache-baseline
+  - regex-translate-cache-lazy-bitmap
+expected_tradeoffs:
+  benefits:
+    - "Lossless: stores actual translation codes, not truncated bytes"
+    - "Fast path covers full 0-255 range (vs 0-127 in baseline)"
+    - "Correct behavior for unibyte buffers where codes 128-255 translate to >= 256"
+    - "No CHAR_TO_BYTE_SAFE call at populate time"
+  costs:
+    - "512 bytes vs 256 bytes in baseline (double the memory)"
+    - "uint16_t may require aligned access on some architectures"
+    - "Codes > 0xFFFE still take slow path (astral Unicode characters)"
+    - "TRANSLATE_TRU comparison `<= 0xFFFF` is always true for uint16_t — guard is redundant but kept for clarity"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

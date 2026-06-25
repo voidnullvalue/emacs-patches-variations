@@ -1,0 +1,137 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: 16-bit entry translation cache covering 0-255 without CHAR_TO_BYTE_SAFE truncation
+# Materially different from baseline: entry type is uint16_t (not unsigned char),
+# fast path covers the full 0-255 range (not 0-127), and the stored value is the
+# actual char code not a truncated byte, allowing correct lossless translation
+# detection for codes 128-255.
+diff --git a/src/regex-emacs.c b/src/regex-emacs.c
+index d8ed8a462a..0000000000 100644
+--- a/src/regex-emacs.c
++++ b/src/regex-emacs.c
+@@ -1196,6 +1196,44 @@
+ #define RE_TRANSLATE(TBL, C) char_table_translate (TBL, C)
+ #define TRANSLATE(d) (!NILP (translate) ? RE_TRANSLATE (translate, d) : (d))
+
++/* Wide-entry translation cache using uint16_t entries.
++
++   The baseline cache uses unsigned char entries, which requires CHAR_TO_BYTE_SAFE
++   to convert the translation result to a raw byte.  This truncates: if a
++   character with code >= 256 translates to another character with code >= 256,
++   the stored value is wrong (CHAR_TO_BYTE_SAFE returns -1, entry is set to
++   identity).  In practice this is rare for ASCII inputs, but for unibyte
++   buffers with codes 128-255, the translation may produce a code >= 256.
++
++   This variant stores uint16_t values (0-65535) in the cache.  The stored value
++   is the actual char code returned by char_table_translate, not a byte value.
++   Codes > 65535 (astral Unicode) still take the slow path.
++
++   The fast path now covers the full 0-255 range, not just 0-127.
++   This is safe because:
++   (a) For multibyte buffers, codes 128-255 are Unicode code points.
++       char_table_translate returns a code point that fits in uint16_t for BMP.
++   (b) For unibyte buffers, codes 128-255 are raw bytes whose translations
++       are stored losslessly in uint16_t.
++
++   Trade-off: 256 * sizeof(uint16_t) = 512 bytes vs baseline's 256 bytes.  */
++
++#define TRANSLATE_TRU(C)						\
++  ((bufp->trt16_valid && (unsigned)(C) < 256				\
++    && bufp->trt16_ascii[(unsigned)(C)] <= 0xFFFF)			\
++   ? (int) bufp->trt16_ascii[(unsigned)(C)]				\
++   : TRANSLATE (C))
++
+ /* Macros for outputting the compiled pattern into 'buffer'.  */
+
+ /* If the buffer isn't allocated when it comes in, use this.  */
+@@ -3503,7 +3543,7 @@
+ 			int buf_charlen;
+
+ 			buf_ch = string_char_and_length (d, &buf_charlen);
+-			buf_ch = RE_TRANSLATE (translate, buf_ch);
++			buf_ch = TRANSLATE_TRU (buf_ch);
+ 			if (fastmap[CHAR_LEADING_CODE (buf_ch)])
+ 			  break;
+
+@@ -3515,7 +3555,7 @@
+ 		      {
+ 			buf_ch = *d;
+ 			int ch = RE_CHAR_TO_MULTIBYTE (buf_ch);
+-			int translated = RE_TRANSLATE (translate, ch);
++			int translated = TRANSLATE_TRU (ch);
+ 			if (translated != ch
+ 			    && (ch = RE_CHAR_TO_UNIBYTE (translated)) >= 0)
+ 			  buf_ch = ch;
+@@ -3552,7 +3592,7 @@
+ 	      if (multibyte)
+ 		{
+ 		  buf_ch = STRING_CHAR (d);
+-		  buf_ch = TRANSLATE (buf_ch);
++		  buf_ch = TRANSLATE_TRU (buf_ch);
+ 		  if (! fastmap[CHAR_LEADING_CODE (buf_ch)])
+ 		    goto advance;
+ 		}
+@@ -3560,11 +3600,11 @@
+ 		{
+ 		  buf_ch = *d;
+ 		  int ch = RE_CHAR_TO_MULTIBYTE (buf_ch);
+-		  int translated = TRANSLATE (ch);
++		  int translated = TRANSLATE_TRU (ch);
+ 		  if (translated != ch
+ 		      && (ch = RE_CHAR_TO_UNIBYTE (translated)) >= 0)
+ 		    buf_ch = ch;
+-		  if (! fastmap[TRANSLATE (buf_ch)])
++		  if (! fastmap[TRANSLATE_TRU (buf_ch)])
+ 		    goto advance;
+ 		}
+ 	    }
+@@ -5348,6 +5388,19 @@
+ 		       whitespace_regexp,
+ 		       bufp);
+
++  /* Populate 16-bit translate cache: store actual char codes (not bytes).
++     Entries > 0xFFFF (astral Unicode) are stored as 0xFFFF sentinel to
++     force TRANSLATE_TRU to take the slow path.  */
++  if (!ret && !NILP (bufp->translate))
++    {
++      for (int i = 0; i < 256; i++)
++	{
++	  int ch = char_table_translate (bufp->translate, i);
++	  bufp->trt16_ascii[i] = (ch <= 0xFFFE ? (uint16_t) ch : 0xFFFF);
++	}
++      bufp->trt16_valid = true;
++    }
++  else
++    bufp->trt16_valid = false;
++
+   if (!ret)
+     return NULL;
+   return re_error_msgid[ret];
+diff --git a/src/regex-emacs.h b/src/regex-emacs.h
+index bcfff662f7..0000000000 100644
+--- a/src/regex-emacs.h
++++ b/src/regex-emacs.h
+@@ -85,6 +85,8 @@
+  struct re_pattern_buffer
+ {
++#include <stdint.h>
++
+   /* Space that holds the compiled pattern.  It is declared as
+      'unsigned char *' because its elements are sometimes used as
+      array indices.  */
+@@ -88,6 +90,18 @@
+            when it is matched.  */
+   Lisp_Object translate;
+
++        /* 16-bit translation cache.  Stores the direct char_table_translate
++           result (a Unicode code point) in uint16_t.  Entries for codes > 0xFFFE
++           are stored as 0xFFFF (sentinel for "use slow path").  This avoids
++           the CHAR_TO_BYTE_SAFE truncation in the baseline and covers codes
++           0-255 (not just 0-127).  Valid only when trt16_valid is true.  */
++  uint16_t trt16_ascii[256];
++
++        /* True iff trt16_ascii has been populated from translate.  */
++  bool_bf trt16_valid : 1;
++
+ 	/* Number of subexpressions found by the compiler.  */
+   ptrdiff_t re_nsub;
+

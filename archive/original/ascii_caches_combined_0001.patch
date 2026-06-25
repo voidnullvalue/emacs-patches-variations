@@ -1,0 +1,557 @@
+diff --git a/src/alloc.c b/src/alloc.c
+index 5fc166dbc2..f97d56a6f6 100644
+--- a/src/alloc.c
++++ b/src/alloc.c
+@@ -23,6 +23,19 @@
+ # include <malloc.h>
+ #endif
+ 
++/* macOS exposes the malloc-zone API in <malloc/malloc.h>, including
++   malloc_zone_pressure_relief(), which asks the allocator to munmap
++   fully-free pages back to the operating system.  Emacs is built with
++   SYSTEM_MALLOC on Darwin, so it cannot itself return freed Lisp
++   memory to the OS; the result is that resident size (RSS) ratchets
++   upward over a long session as freed blocks accumulate in the zone
++   free lists and keep pages resident.  Compacting the zones after GC
++   reclaims those pages, shrinking the footprint and improving cache
++   locality.  See bug#... (macOS memory growth).  */
++#ifdef HAVE_MALLOC_MALLOC_H
++# include <malloc/malloc.h>
++#endif
++
+ #include <errno.h>
+ #include <stdint.h>
+ #include <stdlib.h>
+@@ -5798,6 +5811,108 @@
+   return Qnil;
+ }
+ 
++/* Malloc-zone compaction (memory pressure relief).
++
++   On platforms that provide malloc_zone_pressure_relief() (macOS),
++   ask the system allocator to release fully-free pages back to the
++   operating system.  Emacs uses the system allocator (SYSTEM_MALLOC)
++   on Darwin, so freed Lisp objects merely land on the zone's free
++   lists and keep their pages resident; over a long session this
++   ratchets resident size (RSS) upward and degrades cache locality.
++
++   GOAL of 0 means "release as much as possible".  A non-zero GOAL
++   asks the allocator to target that many bytes.  Returns the number
++   of bytes actually released (best-effort; the allocator may release
++   more or less).
++
++   Passing a NULL zone iterates over every registered zone, which is
++   what we want.  This is the documented public API (available since
++   macOS 10.7) and avoids the task-port and zone-enumeration pitfalls
++   of a hand-rolled loop over malloc_get_all_zones().
++
++   This is not a moving/compacting collector: it cannot relocate live
++   objects, so it does not cure internal fragmentation (a page kept
++   resident by a single live object).  It only reclaims pages that are
++   entirely free.  It is therefore most effective right after a GC,
++   which is where garbage_collect() calls it.  */
++
++#ifdef HAVE_MALLOC_MALLOC_H
++static size_t
++malloc_zone_compact (void)
++{
++  /* malloc_zone_pressure_relief (NULL, 0) examines every zone and
++     makes its best effort to munmap free pages (0 = maximal).  */
++  return malloc_zone_pressure_relief (NULL, 0);
++}
++#endif
++
++/* Statistics accumulated across the session.  These are kept as
++   file-static counters rather than DEFVAR_INT globals to avoid
++   churning the auto-generated globals.h table.  */
++#ifdef HAVE_MALLOC_MALLOC_H
++static uintmax_t memory_compacts_done;
++static uintmax_t memory_compact_bytes_returned;
++#endif
++
++/* Minimum number of bytes that must have been freed by a GC before we
++   consider compacting the malloc zones afterwards.  Compaction walks
++   the whole arena, so doing it on every GC (especially in a -O0 build
++   that GCs often) adds avoidable latency.  We only run it when a GC
++   freed a worthwhile amount, i.e. when there is likely to be
++   returnable memory.  */
++#define MEMORY_COMPACT_FREED_THRESHOLD (4 * 1024 * 1024)
++
++/* Safety net: even if individual GCs free little, flush fragmentation
++   at least this often so gradual leakage does not accumulate
++   unchecked between large collections.  */
++#define MEMORY_COMPACT_EVERY_N_GCS 64
++
++/* Avoid running compaction more often than this, to prevent
++   pathological churn on allocation-heavy workloads where many small
++   GCs each cross the freed threshold.  */
++#define MEMORY_COMPACT_MIN_INTERVAL_SECS 3
++
++/* Decide whether to run malloc-zone compaction after a GC that freed
++   FREED_BYTES of live data, and if so run it.  Called at the very end
++   of garbage_collect(), after all sweeping and before post-gc-hook,
++   so the allocator free lists are as empty as they will get.  */
++
++#ifdef HAVE_MALLOC_MALLOC_H
++static void
++maybe_compact_memory_after_gc (byte_ct freed_bytes)
++{
++  /* GCs are not reentrant and input is blocked for most of GC, so the
++     file-static state below does not need a lock.  */
++  static uintmax_t gc_counter;
++  static struct timespec last_compact;
++  static bool last_compact_set;
++
++  bool crossed_threshold = ((byte_ct) MEMORY_COMPACT_FREED_THRESHOLD
++			    <= freed_bytes);
++  bool periodic = (++gc_counter >= MEMORY_COMPACT_EVERY_N_GCS);
++  if (!crossed_threshold && !periodic)
++    return;
++
++  struct timespec now = current_timespec ();
++  if (last_compact_set)
++    {
++      struct timespec elapsed = timespec_sub (now, last_compact);
++      if (timespectod (elapsed) < MEMORY_COMPACT_MIN_INTERVAL_SECS)
++	return;
++    }
++
++  /* 0 = release as much as possible.  */
++  size_t released = malloc_zone_compact ();
++  memory_compacts_done++;
++  memory_compact_bytes_returned += released;
++  last_compact = now;
++  last_compact_set = true;
++
++  /* Help the profiler/allocator notice the change in footprint.  */
++  MALLOC_PROBE (released);
++}
++#endif	/* HAVE_MALLOC_MALLOC_H */
++
+ /* It may be time to collect garbage.  Recalculate consing_until_gc,
+    since it might depend on current usage, and do the garbage
+    collection if the recalculation says so.  */
+@@ -6012,13 +6127,23 @@
+   gcs_done++;
+ 
+   /* Collect profiling data.  */
++  byte_ct freed_bytes = 0;
+   if (tot_before != (byte_ct) -1)
+     {
+       byte_ct tot_after = total_bytes_of_live_objects ();
+       if (tot_after < tot_before)
+-	malloc_probe (min (tot_before - tot_after, SIZE_MAX));
++	{
++	  freed_bytes = tot_before - tot_after;
++	  malloc_probe (min (freed_bytes, SIZE_MAX));
++	}
+     }
+ 
++  /* Return fully-free malloc pages to the OS (macOS).  Gated so we
++     don't pay the arena walk on every GC; see maybe_compact_memory_after_gc.  */
++#ifdef HAVE_MALLOC_MALLOC_H
++  maybe_compact_memory_after_gc (freed_bytes);
++#endif
++
+   if (!NILP (Vpost_gc_hook))
+     {
+       specpdl_ref gc_count = inhibit_garbage_collection ();
+diff --git a/src/nsterm.m b/src/nsterm.m
+index a7f3fc292c..4490dadd37 100644
+--- a/src/nsterm.m
++++ b/src/nsterm.m
+@@ -151,6 +151,68 @@
+ 
+ /* ==========================================================================
+ 
++   NSColor cache.
++
++   ========================================================================== */
++/* Cache of NSColor objects keyed by their packed 32-bit pixel value.
++
++   Emacs derives NSColor objects from raw face pixels on every glyph run
++   (see the many callers of +colorWithUnsignedLong: below, in nsfont_draw
++   and ns_draw_glyph_string).  Each call allocates and autoreleases a new
++   NSColor and performs colorspace conversion, which is pure overhead
++   given that faces use a small, bounded set of colors.  This direct-
++   mapped cache returns the same NSColor for a given pixel across the
++   whole process, eliminating the per-glyph allocation and conversion.
++
++   Drawing always happens on the main thread, so no locking is needed.
++   The cache never evicts an entry once claimed, so a pointer handed back
++   to a caller stays valid for the process lifetime; a hash collision on
++   a given slot simply misses the cache for that key (rare for the
++   handful of colors in use).  */
++
++#define NS_COLOR_CACHE_SIZE 32768
++
++static NSColor *ns_color_cache[NS_COLOR_CACHE_SIZE];
++static unsigned long ns_color_cache_keys[NS_COLOR_CACHE_SIZE];
++
++static NSUInteger
++ns_color_cache_index (unsigned long key)
++{
++  /* Fibonacci hashing spreads packed ARGB keys uniformly.
++     Used so that low bits don't dominate the cache.  */
++  return (NSUInteger) ((key * 11400714819323198485ULL)
++		       & (NS_COLOR_CACHE_SIZE - 1));
++}
++
++static NSColor *
++ns_color_cache_lookup (unsigned long key)
++{
++  NSUInteger i = ns_color_cache_index (key);
++  if (ns_color_cache[i] != nil && ns_color_cache_keys[i] == key)
++    return ns_color_cache[i];
++  return nil;
++}
++
++/* Store COL under KEY, retaining it for the cache lifetime when the
++   slot is free.  Returns the object the caller should use: the cached
++   object when stored, or the freshly-created (autoreleased) COL when the
++   slot was already occupied by a colliding key.  */
++static NSColor *
++ns_color_cache_store (unsigned long key, NSColor *col)
++{
++  NSUInteger i = ns_color_cache_index (key);
++  if (ns_color_cache[i] == nil)
++    {
++      ns_color_cache[i] = [col retain];
++      ns_color_cache_keys[i] = key;
++      return ns_color_cache[i];
++    }
++  return col;
++}
++
++
++/* ==========================================================================
++
+    NSColor, EmacsColor category.
+ 
+    ========================================================================== */
+@@ -184,12 +246,17 @@
+ 
+ + (NSColor *)colorWithUnsignedLong:(unsigned long)c
+ {
++  NSColor *cached = ns_color_cache_lookup (c);
++  if (cached != nil)
++    return cached;
++
+   EmacsCGFloat a = (double)((c >> 24) & 0xff) / 255.0;
+   EmacsCGFloat r = (double)((c >> 16) & 0xff) / 255.0;
+   EmacsCGFloat g = (double)((c >> 8) & 0xff) / 255.0;
+   EmacsCGFloat b = (double)(c & 0xff) / 255.0;
+ 
+-  return [NSColor colorForEmacsRed:r green:g blue:b alpha:a];
++  NSColor *col = [NSColor colorForEmacsRed:r green:g blue:b alpha:a];
++  return ns_color_cache_store (c, col);
+ }
+ 
+ - (unsigned long)unsignedLong
+diff --git a/src/regex-emacs.c b/src/regex-emacs.c
+index d8ed8a462a..9932824d6c 100644
+--- a/src/regex-emacs.c
++++ b/src/regex-emacs.c
+@@ -50,6 +50,19 @@
+ /* Explicit syntax lookup using the buffer-local table.  */
+ #define BUFFER_SYNTAX(c) syntax_property (c, 0)
+ 
++/* Fast-path syntax lookup using the flat ASCII cache in BUFP.
++   For characters with code < 128 we look up the pre-computed syntax
++   code in syntax_ascii (1 load, 0 branches), avoiding the expensive
++   char-table walk.  Characters with code >= 128 take the unchanged
++   slow path through syntax_property.  This is safe because the
++   syntax table is captured at compile time and the cache is
++   invalidated whenever the syntax table changes (see compile_pattern
++   in search.c).  Assumes BUFP is in scope.  */
++#define SYNTAX_TRU(c)							\
++  ((bufp->syntax_ascii_valid && (unsigned) (c) < 128)			\
++   ? (enum syntaxcode) bufp->syntax_ascii[(unsigned char) (c)]	\
++   : SYNTAX (c))
++
+ #define RE_MULTIBYTE_P(bufp) ((bufp)->multibyte)
+ #define RE_TARGET_MULTIBYTE_P(bufp) ((bufp)->target_multibyte)
+ #define RE_STRING_CHAR(p, multibyte) \
+@@ -1196,6 +1209,22 @@
+ #define RE_TRANSLATE(TBL, C) char_table_translate (TBL, C)
+ #define TRANSLATE(d) (!NILP (translate) ? RE_TRANSLATE (translate, d) : (d))
+ 
++/* Fast-path character translation using the flat ASCII cache in BUFP.
++   For characters with code < 128 we look up the pre-computed value in
++   trt_ascii (1 load, 0 branches), avoiding the expensive char-table
++   walk.  Characters with code >= 128 take the unchanged slow path
++   through char_table_translate: this is necessary because (a) for
++   multibyte buffers codes 128-255 are real Unicode code points whose
++   translation is a char code, and (b) for unibyte buffers raw bytes
++   >= 128 are translated via their 0x3FFF00+ representation, not as
++   the raw code point.  ASCII (< 128) is identical in both
++   representations, so caching it is always safe.  Assumes BUFP and TRANSLATE's assumed
++   variables (translate) are in scope.  */
++#define TRANSLATE_TRU(C)					\
++  ((bufp->trt_ascii_valid && (unsigned) (C) < 128)		\
++   ? bufp->trt_ascii[(unsigned char) (C)]				\
++   : TRANSLATE (C))
++
+ /* Macros for outputting the compiled pattern into 'buffer'.  */
+ 
+ /* If the buffer isn't allocated when it comes in, use this.  */
+@@ -3503,7 +3532,7 @@
+ 			int buf_charlen;
+ 
+ 			buf_ch = string_char_and_length (d, &buf_charlen);
+-			buf_ch = RE_TRANSLATE (translate, buf_ch);
++			buf_ch = TRANSLATE_TRU (buf_ch);
+ 			if (fastmap[CHAR_LEADING_CODE (buf_ch)])
+ 			  break;
+ 
+@@ -3515,7 +3544,7 @@
+ 		      {
+ 			buf_ch = *d;
+ 			int ch = RE_CHAR_TO_MULTIBYTE (buf_ch);
+-			int translated = RE_TRANSLATE (translate, ch);
++			int translated = TRANSLATE_TRU (ch);
+ 			if (translated != ch
+ 			    && (ch = RE_CHAR_TO_UNIBYTE (translated)) >= 0)
+ 			  buf_ch = ch;
+@@ -3552,7 +3581,7 @@
+ 	      if (multibyte)
+ 		{
+ 		  buf_ch = STRING_CHAR (d);
+-		  buf_ch = TRANSLATE (buf_ch);
++		  buf_ch = TRANSLATE_TRU (buf_ch);
+ 		  if (! fastmap[CHAR_LEADING_CODE (buf_ch)])
+ 		    goto advance;
+ 		}
+@@ -3560,11 +3589,11 @@
+ 		{
+ 		  buf_ch = *d;
+ 		  int ch = RE_CHAR_TO_MULTIBYTE (buf_ch);
+-		  int translated = TRANSLATE (ch);
++		  int translated = TRANSLATE_TRU (ch);
+ 		  if (translated != ch
+ 		      && (ch = RE_CHAR_TO_UNIBYTE (translated)) >= 0)
+ 		    buf_ch = ch;
+-		  if (! fastmap[TRANSLATE (buf_ch)])
++		  if (! fastmap[TRANSLATE_TRU (buf_ch)])
+ 		    goto advance;
+ 		}
+ 	    }
+@@ -4456,7 +4485,7 @@
+ 		  }
+ 		buf_ch = string_char_and_length (d, &buf_charlen);
+ 
+-		if (TRANSLATE (buf_ch) != pat_ch)
++		if (TRANSLATE_TRU (buf_ch) != pat_ch)
+ 		  {
+ 		    d = dfail;
+ 		    goto fail;
+@@ -4488,7 +4517,7 @@
+ 		buf_ch = RE_CHAR_TO_MULTIBYTE (*d);
+ 		if (! CHAR_BYTE8_P (buf_ch))
+ 		  {
+-		    buf_ch = TRANSLATE (buf_ch);
++		    buf_ch = TRANSLATE_TRU (buf_ch);
+ 		    buf_ch = RE_CHAR_TO_UNIBYTE (buf_ch);
+ 		    if (buf_ch < 0)
+ 		      buf_ch = *d;
+@@ -4521,7 +4550,7 @@
+ 	    PREFETCH ();
+ 	    buf_ch = RE_STRING_CHAR_AND_LENGTH (d, buf_charlen,
+ 						target_multibyte);
+-	    buf_ch = TRANSLATE (buf_ch);
++	    buf_ch = TRANSLATE_TRU (buf_ch);
+ 	    if (buf_ch == '\n')
+ 	      goto fail;
+ 
+@@ -4549,7 +4578,7 @@
+ 	      {
+ 		int c1;
+ 
+-		c = TRANSLATE (c);
++		c = TRANSLATE_TRU (c);
+ 		c1 = RE_CHAR_TO_UNIBYTE (c);
+ 		if (c1 >= 0)
+ 		  {
+@@ -4563,7 +4592,7 @@
+ 
+ 		if (! CHAR_BYTE8_P (c1))
+ 		  {
+-		    c1 = TRANSLATE (c1);
++		    c1 = TRANSLATE_TRU (c1);
+ 		    c1 = RE_CHAR_TO_UNIBYTE (c1);
+ 		    if (c1 >= 0)
+ 		      {
+@@ -4983,12 +5012,12 @@
+ 		UPDATE_SYNTAX_TABLE (charpos);
+ 		GET_CHAR_BEFORE_2 (c1, d, string1, end1, string2, end2);
+ 		nchars++;
+-		s1 = SYNTAX (c1);
++		s1 = SYNTAX_TRU (c1);
+ 		UPDATE_SYNTAX_TABLE_FORWARD (charpos + 1);
+ 		PREFETCH_NOLIMIT ();
+ 		GET_CHAR_AFTER (c2, d, dummy);
+ 		nchars++;
+-		s2 = SYNTAX (c2);
++		s2 = SYNTAX_TRU (c2);
+ 
+ 		if (/* Case 2: Only one of S1 and S2 is Sword.  */
+ 		    ((s1 == Sword) != (s2 == Sword))
+@@ -5024,7 +5053,7 @@
+ 	      PREFETCH ();
+ 	      GET_CHAR_AFTER (c2, d, dummy);
+ 	      nchars++;
+-	      s2 = SYNTAX (c2);
++	      s2 = SYNTAX_TRU (c2);
+ 
+ 	      /* Case 2: S2 is not Sword. */
+ 	      if (s2 != Sword)
+@@ -5036,7 +5065,7 @@
+ 		  GET_CHAR_BEFORE_2 (c1, d, string1, end1, string2, end2);
+ 		  nchars++;
+ 		  UPDATE_SYNTAX_TABLE_BACKWARD (charpos - 1);
+-		  s1 = SYNTAX (c1);
++		  s1 = SYNTAX_TRU (c1);
+ 
+ 		  /* ... and S1 is Sword, and WORD_BOUNDARY_P (C1, C2)
+ 		     returns 0.  */
+@@ -5066,7 +5095,7 @@
+ 	      UPDATE_SYNTAX_TABLE (charpos);
+ 	      GET_CHAR_BEFORE_2 (c1, d, string1, end1, string2, end2);
+ 	      nchars++;
+-	      s1 = SYNTAX (c1);
++	      s1 = SYNTAX_TRU (c1);
+ 
+ 	      /* Case 2: S1 is not Sword.  */
+ 	      if (s1 != Sword)
+@@ -5079,7 +5108,7 @@
+ 		  GET_CHAR_AFTER (c2, d, dummy);
+ 		  nchars++;
+                   UPDATE_SYNTAX_TABLE_FORWARD (charpos + 1);
+-		  s2 = SYNTAX (c2);
++		  s2 = SYNTAX_TRU (c2);
+ 
+ 		  /* ... and S2 is Sword, and WORD_BOUNDARY_P (C1, C2)
+ 		     returns 0.  */
+@@ -5109,7 +5138,7 @@
+ 	      PREFETCH ();
+ 	      c2 = RE_STRING_CHAR (d, target_multibyte);
+ 	      nchars++;
+-	      s2 = SYNTAX (c2);
++	      s2 = SYNTAX_TRU (c2);
+ 
+ 	      /* Case 2: S2 is neither Sword nor Ssymbol. */
+ 	      if (s2 != Sword && s2 != Ssymbol)
+@@ -5121,7 +5150,7 @@
+ 		  GET_CHAR_BEFORE_2 (c1, d, string1, end1, string2, end2);
+ 		  nchars++;
+ 		  UPDATE_SYNTAX_TABLE_BACKWARD (charpos - 1);
+-		  s1 = SYNTAX (c1);
++		  s1 = SYNTAX_TRU (c1);
+ 
+ 		  /* ... and S1 is Sword or Ssymbol.  */
+ 		  if (s1 == Sword || s1 == Ssymbol)
+@@ -5149,7 +5178,7 @@
+ 	      UPDATE_SYNTAX_TABLE (charpos);
+ 	      GET_CHAR_BEFORE_2 (c1, d, string1, end1, string2, end2);
+ 	      nchars++;
+-	      s1 = SYNTAX (c1);
++	      s1 = SYNTAX_TRU (c1);
+ 
+ 	      /* Case 2: S1 is neither Ssymbol nor Sword.  */
+ 	      if (s1 != Sword && s1 != Ssymbol)
+@@ -5162,7 +5191,7 @@
+ 		  c2 = RE_STRING_CHAR (d, target_multibyte);
+ 		  nchars++;
+ 		  UPDATE_SYNTAX_TABLE_FORWARD (charpos + 1);
+-		  s2 = SYNTAX (c2);
++		  s2 = SYNTAX_TRU (c2);
+ 
+ 		  /* ... and S2 is Sword or Ssymbol.  */
+ 		  if (s2 == Sword || s2 == Ssymbol)
+@@ -5189,7 +5218,7 @@
+ 	      int c;
+ 
+ 	      GET_CHAR_AFTER (c, d, len);
+-	      if ((SYNTAX (c) != (enum syntaxcode) mcnt) ^ not)
++	      if ((SYNTAX_TRU (c) != (enum syntaxcode) mcnt) ^ not)
+ 		goto fail;
+ 	      d += len;
+ 	      nchars++;
+@@ -5348,6 +5377,41 @@
+ 		       whitespace_regexp,
+ 		       bufp);
+ 
++
++  /* Populate the flat ASCII translate cache so the hot match/scan
++     loops can avoid the expensive char-table walk for single-byte
++     characters.  Multibyte characters (code > 255) always take the
++     slow path through char_table_translate, so this changes nothing
++     for non-ASCII text.  */
++  if (!ret && !NILP (bufp->translate))
++    {
++      for (int i = 0; i < 256; i++)
++	{
++	  int ch = char_table_translate (bufp->translate, i);
++	  int byte = CHAR_TO_BYTE_SAFE (ch);
++	  bufp->trt_ascii[i] = (byte >= 0 ? byte : i);
++	}
++      bufp->trt_ascii_valid = true;
++    }
++  else
++    bufp->trt_ascii_valid = false;
++
++  /* Populate the flat ASCII syntax cache so the hot match opcodes
++     (wordbeg, wordend, wordbound, etc.) can avoid the expensive
++     char-table walk for single-byte characters.  This is only safe
++     when syntax properties are not in use, because otherwise the
++     syntax code of a character can vary by position via the
++     syntax-table text property.  Multibyte characters (code > 127)
++     always take the slow path regardless.  */
++  if (!ret && bufp->used_syntax && !parse_sexp_lookup_properties)
++    {
++      for (int i = 0; i < 128; i++)
++	bufp->syntax_ascii[i] = syntax_property (i, 0);
++      bufp->syntax_ascii_valid = true;
++    }
++  else
++    bufp->syntax_ascii_valid = false;
++
+   if (!ret)
+     return NULL;
+   return re_error_msgid[ret];
+diff --git a/src/regex-emacs.h b/src/regex-emacs.h
+index bcfff662f7..b6f2510ed0 100644
+--- a/src/regex-emacs.h
++++ b/src/regex-emacs.h
+@@ -88,6 +88,31 @@
+            when it is matched.  */
+   Lisp_Object translate;
+ 
++        /* Flat lookup table caching the ASCII (0-255) portion of the
++           translate table above, so that the hot match/scan loops can
++           avoid the expensive char-table walk for the overwhelmingly
++           common case of single-byte characters.  Valid only when
++           trt_ascii_valid is true; entries for codes >= 128 that have
++           no translation are stored as their own value (identity).
++           Multibyte characters (code > 255) always take the slow path
++           through char_table_translate.  */
++  unsigned char trt_ascii[256];
++
++        /* True iff trt_ascii has been populated from translate.  */
++  bool_bf trt_ascii_valid : 1;
++
++        /* Flat lookup table caching the syntax code of ASCII characters
++           (0-127) from the buffer-local syntax table, so that the hot
++           match opcodes (wordbeg, wordend, wordbound, etc.) can avoid
++           the expensive char-table walk for the overwhelmingly common
++           case of single-byte characters.  Valid only when
++           syntax_ascii_valid is true; multibyte characters (code > 127)
++           always take the slow path through syntax_property.  */
++  unsigned char syntax_ascii[128];
++
++        /* True iff syntax_ascii has been populated and is safe to use.  */
++  bool_bf syntax_ascii_valid : 1;
++
+ 	/* Number of subexpressions found by the compiler.  */
+   ptrdiff_t re_nsub;
+ 

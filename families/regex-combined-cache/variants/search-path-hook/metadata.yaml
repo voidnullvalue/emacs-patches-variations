@@ -1,0 +1,42 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-combined-cache-search-path-hook
+family: regex-combined-cache
+title: "Combined cache with search.c compile_pattern hook for cross-search reuse"
+llm_assisted: true
+llm_system: "Claude Code"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+  - src/search.c
+design_dimensions:
+  cache_location: "per-pattern (re_pattern_buffer) + single-entry search-path cache in search.c"
+  integration_point: "search.c compile_pattern wrapper (outer layer)"
+  reuse_strategy: "skip re_compile_pattern entirely on key match (pattern text + syntax table + translate table)"
+  key_comparison: "byte-for-byte pattern text + Lisp_Object pointer equality for tables"
+  cache_entries: 1
+  invalidation: "key mismatch on any parameter change"
+  population_strategy: "eager at re_compile_pattern (same as baseline for first compile)"
+dependencies:
+  - "search.c compile_pattern must be modifiable"
+  - "Lisp_Object pointer equality must be sufficient for table identity"
+conflicts:
+  - regex-combined-cache-baseline
+  - regex-combined-cache-unified-generation
+expected_tradeoffs:
+  benefits:
+    - "Avoids re_compile_pattern entirely for repeated searches with the same pattern"
+    - "Amortizes both regex compilation and ASCII cache population"
+    - "Works on top of the baseline cache: both fast-path benefits are preserved"
+    - "No regex-level changes needed beyond baseline"
+  costs:
+    - "Single-entry cache: only one pattern is memoized; alternating two patterns misses every time"
+    - "Pattern text stored in heap (malloc); allocation + memcpy on update"
+    - "Syntax table identity via pointer equality may be wrong if tables are modified in-place"
+    - "Requires search.c modification (not just regex-emacs.c)"
+    - "Static SearchPathCache is global, incompatible with thread-safe search"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

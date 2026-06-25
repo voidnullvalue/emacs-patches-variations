@@ -1,0 +1,40 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: ns-color-cache-counted-lru
+family: ns-color-cache
+title: "NSColor CLOCK-approximation LRU cache (64 slots, bounded memory)"
+llm_assisted: true
+llm_system: "Claude Code"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/nsterm.m: a7f3fc292c"
+files_modified:
+  - src/nsterm.m
+design_dimensions:
+  cache_structure: "flat array with CLOCK-hand eviction"
+  cache_size: 64
+  eviction_policy: "CLOCK approximation of LRU (reference bit + rotating hand)"
+  lifetime: "process lifetime (entries evicted and reused)"
+  scope: "global"
+  thread_safety: "none required"
+  lookup_complexity: "O(N) scan (N=64, fits in a few cache lines)"
+  eviction_complexity: "O(N) worst case (single clock pass), O(1) amortized"
+  memory_bytes: 64
+dependencies: []
+conflicts:
+  - ns-color-cache-baseline
+  - ns-color-cache-open-addressing
+  - ns-color-cache-per-frame
+expected_tradeoffs:
+  benefits:
+    - "Strictly bounded memory: 64 entries regardless of color diversity"
+    - "Correct LRU-approximation eviction; frequently-used colors survive"
+    - "< 2 KB total storage"
+    - "Evicted NSColors are released, reducing heap pressure"
+  costs:
+    - "O(N) linear scan for lookup (vs O(1) hash for baseline)"
+    - "CLOCK hand state adds per-eviction iteration cost"
+    - "Hit rate degrades if > 64 colors are in active rotation"
+    - "No hashing means worst-case 64 comparisons per lookup"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

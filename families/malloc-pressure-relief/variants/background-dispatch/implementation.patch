@@ -1,0 +1,139 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: background GCD dispatch of malloc_zone_pressure_relief
+# Materially different from baseline: timing model (async via libdispatch vs
+# synchronous), GC pause impact (zero vs small pause), thread model (background
+# thread vs main thread), synchronization (atomic flag vs none).
+diff --git a/src/alloc.c b/src/alloc.c
+index 5fc166dbc2..0000000000 100644
+--- a/src/alloc.c
++++ b/src/alloc.c
+@@ -23,6 +23,27 @@
+ # include <malloc.h>
+ #endif
+
++/* macOS GCD + malloc-zone background compaction.
++
++   On macOS, malloc_zone_pressure_relief() walks the allocator arena and
++   munmaps fully-free pages.  The baseline variant calls this synchronously
++   at the end of garbage_collect(), which adds latency to GC pauses.
++
++   This variant dispatches the compaction to a low-priority background queue
++   using libdispatch (GCD).  The GC pause is zero; compaction runs
++   asynchronously after GC completes.  An atomic flag prevents overlapping
++   dispatches: if a prior compaction is still in flight when the next GC
++   fires, the new request is silently dropped.
++
++   Correctness: malloc_zone_pressure_relief is documented as safe to call
++   from a background thread.  The allocator's internal locking ensures
++   correctness under concurrent allocation from the main thread.  */
++#ifdef HAVE_MALLOC_MALLOC_H
++# include <malloc/malloc.h>
++# include <dispatch/dispatch.h>
++# include <stdatomic.h>
++#endif
++
+ #include <errno.h>
+ #include <stdint.h>
+ #include <stdlib.h>
+@@ -5798,6 +5819,77 @@
+   return Qnil;
+ }
+
++/* Background malloc-zone compaction via GCD.  */
++
++#ifdef HAVE_MALLOC_MALLOC_H
++
++/* Minimum bytes freed by GC before we consider dispatching compaction.
++   Lower than the baseline's 4 MB because the cost is now borne by a
++   background thread, not by the GC pause.  */
++#define BGCOMPACT_FREED_THRESHOLD (1 * 1024 * 1024)
++
++/* Minimum wall-clock interval between dispatched compactions (seconds).
++   Even asynchronous compaction consumes CPU; rate-limit it.  */
++#define BGCOMPACT_MIN_INTERVAL_SECS 5
++
++/* Set to 1 while a dispatched compaction block is in flight.
++   Prevents overlapping dispatches.  */
++static _Atomic int bgcompact_in_flight;
++
++static uintmax_t bgcompact_dispatches;
++static uintmax_t bgcompact_skipped_in_flight;
++
++static dispatch_queue_t
++bgcompact_queue (void)
++{
++  /* Create once; GCD manages the singleton via dispatch_once if needed.
++     QOS_CLASS_BACKGROUND: lowest priority, will not compete with Emacs.  */
++  static dispatch_queue_t q;
++  static dispatch_once_t once;
++  dispatch_once (&once, ^{
++    q = dispatch_queue_create ("org.gnu.emacs.malloc-compact",
++                               DISPATCH_QUEUE_SERIAL);
++    dispatch_set_target_queue (q,
++      dispatch_get_global_queue (QOS_CLASS_BACKGROUND, 0));
++  });
++  return q;
++}
++
++static void
++maybe_compact_memory_after_gc_bg (byte_ct freed_bytes)
++{
++  static struct timespec last_dispatch;
++  static bool last_dispatch_set;
+
++  if (freed_bytes < (byte_ct) BGCOMPACT_FREED_THRESHOLD)
++    return;
++
++  struct timespec now = current_timespec ();
++  if (last_dispatch_set)
++    {
++      struct timespec elapsed = timespec_sub (now, last_dispatch);
++      if (timespectod (elapsed) < BGCOMPACT_MIN_INTERVAL_SECS)
++        return;
++    }
++
++  /* Bail if a prior compaction is still running.  */
++  int expected = 0;
++  if (!atomic_compare_exchange_strong (&bgcompact_in_flight, &expected, 1))
++    {
++      bgcompact_skipped_in_flight++;
++      return;
++    }
++
++  last_dispatch = now;
++  last_dispatch_set = true;
++  bgcompact_dispatches++;
+
++  dispatch_async (bgcompact_queue (), ^{
++    malloc_zone_pressure_relief (NULL, 0);
++    atomic_store (&bgcompact_in_flight, 0);
++  });
++}
++
++#endif /* HAVE_MALLOC_MALLOC_H */
++
+ /* It may be time to collect garbage.  */
+@@ -6012,13 +6104,23 @@
+   gcs_done++;
+
+   /* Collect profiling data.  */
++  byte_ct freed_bytes = 0;
+   if (tot_before != (byte_ct) -1)
+     {
+       byte_ct tot_after = total_bytes_of_live_objects ();
+       if (tot_after < tot_before)
+-	malloc_probe (min (tot_before - tot_after, SIZE_MAX));
++	{
++	  freed_bytes = tot_before - tot_after;
++	  malloc_probe (min (freed_bytes, SIZE_MAX));
++	}
+     }
+
++  /* Dispatch background malloc-zone compaction (zero GC-pause cost).  */
++#ifdef HAVE_MALLOC_MALLOC_H
++  maybe_compact_memory_after_gc_bg (freed_bytes);
++#endif
++
+   if (!NILP (Vpost_gc_hook))
+     {
+       specpdl_ref gc_count = inhibit_garbage_collection ();
