@@ -1,0 +1,49 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: ns-color-cache-two-way-set-associative
+family: ns-color-cache
+title: "NSColor 2-way set-associative cache (256 sets × 2 ways, per-set CLOCK eviction)"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/nsterm.m: a7f3fc292c"
+files_modified:
+  - src/nsterm.m
+design_dimensions:
+  cache_structure: "2-way set-associative flat array"
+  sets: 256
+  ways: 2
+  total_entries: 512
+  hash: "Fibonacci multiplicative, top 8 bits for set index"
+  eviction_policy: "per-set CLOCK (reference bit + 1-bit hand per set)"
+  collision_behavior: "two colliding keys compete within the same set; CLOCK picks victim"
+  lifetime: "process lifetime (entries evicted and reused)"
+  scope: "global"
+  thread_safety: "none required"
+  memory_bytes_approx: 12288
+dependencies: []
+conflicts:
+  - ns-color-cache-baseline
+  - ns-color-cache-open-addressing
+  - ns-color-cache-per-frame
+  - ns-color-cache-counted-lru
+  - ns-color-cache-single-entry-hot-cache
+  - ns-color-cache-nsmutable-dictionary
+  - ns-color-cache-nscache
+  - ns-color-cache-per-display-backend
+expected_tradeoffs:
+  benefits:
+    - "Bounded memory: exactly 512 entries regardless of color diversity"
+    - "Set-associativity reduces collision penalty vs direct-mapped baseline"
+    - "CLOCK eviction gives recently-used entries a second chance"
+    - "Deterministic replacement: no probabilistic eviction"
+    - "Correctly retains/releases evicted NSColor objects"
+  costs:
+    - "Two comparisons per lookup (one per way)"
+    - "Per-set CLOCK hand adds 256 bytes of state"
+    - "12 KB total — larger than single-entry or CLOCK-LRU at 64 entries"
+    - "Two keys hashing to same set still compete (unavoidable for fixed-size caches)"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

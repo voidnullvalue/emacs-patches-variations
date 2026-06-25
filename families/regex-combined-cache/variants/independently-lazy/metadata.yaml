@@ -1,0 +1,42 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-combined-cache-independently-lazy
+family: regex-combined-cache
+title: "Combined regex cache with independently lazy subcache initialization"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+design_dimensions:
+  population: "independent lazy initialization per subcache"
+  trigger: "first use of SYNTAX_TRU / TRANSLATE_TRU respectively"
+  validity_flags: "built (ensure ran) + valid (result is usable) per subcache"
+  amortization: "patterns that never translate skip translate initialization"
+  translate_ref: "Lisp_Object stored at compile time for lazy translate population"
+  partial_initialization: "syntax can be built while translate is not, and vice versa"
+dependencies: []
+conflicts:
+  - regex-combined-cache-baseline
+  - regex-combined-cache-unified-generation
+  - regex-combined-cache-search-path-hook
+  - regex-combined-cache-per-character-struct
+  - regex-combined-cache-packed-entry
+  - regex-combined-cache-combined-sidecar
+expected_tradeoffs:
+  benefits:
+    - "Patterns that never use word-boundary opcodes skip syntax population"
+    - "Patterns without translate table skip translate population entirely"
+    - "Population cost amortized to first use rather than compile time"
+    - "Independent built flags allow partial state without ambiguity"
+  costs:
+    - "ensure_*_cache function call overhead on every SYNTAX_TRU / TRANSLATE_TRU call"
+    - "Four extra bool flags (built + valid for each subcache) in re_pattern_buffer"
+    - "translate_ref Lisp_Object requires GC awareness (same caveat as table-generation)"
+    - "First-use path is slower than compile-time: ensure function runs populate loop"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

@@ -1,0 +1,110 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: NSCache-backed cache — uses Foundation NSCache with countLimit
+# Materially different from baseline: cache structure is NSCache (vs flat C array);
+# eviction policy is automatic under memory pressure (vs never-evict);
+# countLimit is advisory (not strictly enforced); thread safety is provided by NSCache.
+diff --git a/src/nsterm.m b/src/nsterm.m
+index a7f3fc292c..0000000000 100644
+--- a/src/nsterm.m
++++ b/src/nsterm.m
+@@ -151,6 +151,86 @@
+
+ /* ==========================================================================
+
++   NSColor NSCache-backed cache.
++
++   ========================================================================== */
++/* Cache of NSColor objects backed by NSCache.
++
++   NSCache is a mutable collection that automatically removes entries in
++   response to system memory pressure.  Unlike NSMutableDictionary it does
++   not grow without bound; the system may evict entries at any time.
++
++   Design choices:
++   - countLimit is set to 512 to provide a soft upper bound.  NSCache treats
++     countLimit as advisory; it may hold more or fewer entries.
++   - Keys are NSNumber objects wrapping the packed pixel value.
++   - Values are NSColor objects; NSCache retains them.
++   - Callers receive a valid object at the time of the call.  The cache may
++     evict the object after the call returns, but the caller's local variable
++     keeps it alive while in use.  Callers must not assume the object is
++     present in the cache on the next call.
++
++   Differences from deterministic bounded caches:
++   - NSCache eviction is non-deterministic (triggered by memory pressure,
++     not by a fixed CLOCK or LRU policy).
++   - NSCache is thread-safe by API contract (unlike NSMutableDictionary).
++   - The effective cache size is system-managed and may differ from countLimit.
++
++   Thread safety: NSCache is documented as thread-safe.  NS drawing is
++   single-threaded in practice; the thread-safety guarantee is not currently
++   needed but avoids future breakage if the drawing path is ever parallelized.
++
++   Do not use this variant as a production recommendation without benchmark
++   data demonstrating that NSCache eviction policy matches the Emacs color
++   access pattern better than a deterministic alternative.  */
++
++#define NS_NSCACHE_COUNT_LIMIT 512
++
++static NSCache *ns_color_nscache;
++
++static void
++ns_nscache_init (void)
++{
++  if (!ns_color_nscache)
++    {
++      ns_color_nscache = [[NSCache alloc] init];
++      ns_color_nscache.countLimit = NS_NSCACHE_COUNT_LIMIT;
++    }
++}
++
++static void
++ns_nscache_teardown (void)
++{
++  [ns_color_nscache release];
++  ns_color_nscache = nil;
++}
++
++static NSColor *
++ns_nscache_lookup (unsigned long key)
++{
++  return [ns_color_nscache objectForKey: @((unsigned long) key)];
++}
++
++static void
++ns_nscache_store (unsigned long key, NSColor *col)
++{
++  [ns_color_nscache setObject: col forKey: @((unsigned long) key)];
++}
++
++
++/* ==========================================================================
++
+    NSColor, EmacsColor category.
+
+    ========================================================================== */
+@@ -184,12 +270,17 @@
+
+ + (NSColor *)colorWithUnsignedLong:(unsigned long)c
+ {
++  NSColor *cached = ns_nscache_lookup (c);
++  if (cached != nil)
++    return cached;
++
+   EmacsCGFloat a = (double)((c >> 24) & 0xff) / 255.0;
+   EmacsCGFloat r = (double)((c >> 16) & 0xff) / 255.0;
+   EmacsCGFloat g = (double)((c >> 8) & 0xff) / 255.0;
+   EmacsCGFloat b = (double)(c & 0xff) / 255.0;
+
+-  return [NSColor colorForEmacsRed:r green:g blue:b alpha:a];
++  NSColor *col = [NSColor colorForEmacsRed:r green:g blue:b alpha:a];
++  ns_nscache_store (c, col);
++  return col;
+ }
+
+ - (unsigned long)unsignedLong
+@@ -XXXX,X +XXXX,X @@ ns_initialize_display_info (...)
++  ns_nscache_init ();
+
+@@ -XXXX,X +XXXX,X @@ ns_term_shutdown (...)
++  ns_nscache_teardown ();

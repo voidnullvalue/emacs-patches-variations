@@ -1,0 +1,46 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: ns-color-cache-single-entry-hot-cache
+family: ns-color-cache
+title: "NSColor single-entry hot cache (1 slot, unconditional replacement)"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/nsterm.m: a7f3fc292c"
+files_modified:
+  - src/nsterm.m
+design_dimensions:
+  cache_structure: "single slot (1 entry)"
+  cache_size: 1
+  eviction_policy: "unconditional replacement on miss"
+  lifetime: "process lifetime with explicit teardown"
+  scope: "global"
+  thread_safety: "none required (NS drawing on main thread)"
+  lookup_complexity: "O(1) — one comparison"
+  memory_bytes: 24
+  teardown: "ns_hot_cache_teardown() called from ns_term_shutdown"
+dependencies: []
+conflicts:
+  - ns-color-cache-baseline
+  - ns-color-cache-open-addressing
+  - ns-color-cache-per-frame
+  - ns-color-cache-counted-lru
+  - ns-color-cache-two-way-set-associative
+  - ns-color-cache-nsmutable-dictionary
+  - ns-color-cache-nscache
+  - ns-color-cache-per-display-backend
+expected_tradeoffs:
+  benefits:
+    - "Minimum possible memory: one pointer, one key, one bool"
+    - "Zero hash computation — one equality test for lookup"
+    - "Near-100% hit rate when consecutive glyphs share the same color"
+    - "Explicit teardown prevents NSColor leak at process exit"
+  costs:
+    - "Hit rate collapses to ~0% when colors alternate on every call"
+    - "Every miss replaces the cached entry (previous color is released)"
+    - "Provides no benefit for themes with many simultaneously active colors"
+    - "Teardown coupling to ns_term_shutdown adds an integration dependency"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

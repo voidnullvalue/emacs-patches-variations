@@ -1,0 +1,46 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: malloc-pressure-relief-idle-triggered
+family: malloc-pressure-relief
+title: "Malloc-zone pressure relief deferred to Emacs idle loop"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/alloc.c: 5fc166dbc2"
+files_modified:
+  - src/alloc.c
+  - src/keyboard.c
+design_dimensions:
+  trigger_policy: "threshold-gated flag set during GC; executed on next idle iteration"
+  timing: "deferred — arena walk happens in idle loop, not in GC critical path"
+  pending_state: "bool flag (pressure_relief_pending)"
+  duplicate_prevention: "check-before-set: if already pending, GC skips the set"
+  cleared_on: "execute_pending_pressure_relief clears flag before arena walk"
+  reentrancy: "GC cannot re-enter idle path; flag cleared before walk prevents double-exec"
+  shutdown_behavior: "pending relief abandoned on exit (OS reclaims on process exit)"
+  integration_point: "keyboard.c idle processing section"
+  freed_threshold_bytes: 4194304
+dependencies: []
+conflicts:
+  - malloc-pressure-relief-baseline
+  - malloc-pressure-relief-background-dispatch
+  - malloc-pressure-relief-adaptive-threshold
+  - malloc-pressure-relief-manual-lisp-primitive
+  - malloc-pressure-relief-every-gc-control
+  - malloc-pressure-relief-freed-byte-goal
+  - malloc-pressure-relief-effectiveness-backoff
+expected_tradeoffs:
+  benefits:
+    - "Zero GC latency impact: no arena walk during garbage_collect()"
+    - "Deferred execution reduces worst-case GC pause"
+    - "Idle path execution occurs when user is not actively interacting"
+    - "Single flag prevents duplicate scheduling between GCs"
+  costs:
+    - "Memory not reclaimed immediately after GC; delay until next idle"
+    - "Requires keyboard.c modification (two-file patch)"
+    - "If Emacs is never idle (continuous input), relief never executes"
+    - "Harder to test: idle execution path is not directly unit-testable without event loop"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

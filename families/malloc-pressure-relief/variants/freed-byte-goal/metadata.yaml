@@ -1,0 +1,42 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: malloc-pressure-relief-freed-byte-goal
+family: malloc-pressure-relief
+title: "Malloc-zone pressure relief with GC freed-byte count as goal argument"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/alloc.c: 5fc166dbc2"
+files_modified:
+  - src/alloc.c
+design_dimensions:
+  trigger_policy: "threshold + periodic (same as baseline)"
+  goal_argument: "freed_bytes from the completed GC, clamped to SIZE_MAX; 0 for periodic trigger with no freed bytes"
+  semantic_difference: "non-zero goal is a hint for early-termination of arena walk; goal=0 means maximal"
+  zero_handling: "periodic trigger with freed_bytes=0 passes goal=0 (maximal)"
+  overflow_handling: "byte_ct → size_t conversion with explicit SIZE_MAX clamp"
+  rate_limit: "minimum 3 seconds between compactions"
+dependencies: []
+conflicts:
+  - malloc-pressure-relief-baseline
+  - malloc-pressure-relief-background-dispatch
+  - malloc-pressure-relief-adaptive-threshold
+  - malloc-pressure-relief-manual-lisp-primitive
+  - malloc-pressure-relief-idle-triggered
+  - malloc-pressure-relief-every-gc-control
+  - malloc-pressure-relief-effectiveness-backoff
+expected_tradeoffs:
+  benefits:
+    - "Arena walk may terminate early when goal is met (allocator-dependent)"
+    - "Safe integer conversion prevents truncation on platforms with size_t < uintmax_t"
+    - "Provides meaningful hint to allocator about expected release size"
+    - "Same trigger policy as baseline: no additional compaction frequency"
+  costs:
+    - "Goal argument is an advisory hint; allocator may ignore it and walk fully"
+    - "Latency reduction depends on allocator implementation, not guaranteed"
+    - "Periodic trigger uses goal=0 (fallback), removing the hint in that case"
+    - "Not validated to reduce latency vs goal=0 in practice"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

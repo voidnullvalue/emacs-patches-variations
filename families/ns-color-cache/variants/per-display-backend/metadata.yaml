@@ -1,0 +1,46 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: ns-color-cache-per-display-backend
+family: ns-color-cache
+title: "NSColor cache attached to NsDisplayInfo backend (per-display scope)"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/nsterm.m: a7f3fc292c"
+files_modified:
+  - src/nsterm.m
+  - src/nsterm.h
+design_dimensions:
+  cache_structure: "NSMutableDictionary per NsDisplayInfo"
+  scope: "per-NS-display backend"
+  lifetime: "tied to NsDisplayInfo creation and teardown"
+  initialization: "ns_initialize_display_info()"
+  teardown: "ns_term_shutdown() or display-specific teardown path"
+  owning_structure: "NsDisplayInfo (struct ns_display_info)"
+  vs_per_frame: "per-display is shared across all frames on the same display; per-frame is per-window"
+  vs_global: "global cache persists across display disconnects; per-display cache is released on teardown"
+dependencies: []
+conflicts:
+  - ns-color-cache-baseline
+  - ns-color-cache-open-addressing
+  - ns-color-cache-per-frame
+  - ns-color-cache-counted-lru
+  - ns-color-cache-single-entry-hot-cache
+  - ns-color-cache-two-way-set-associative
+  - ns-color-cache-nsmutable-dictionary
+  - ns-color-cache-nscache
+expected_tradeoffs:
+  benefits:
+    - "Cache state does not leak between display/backend instances"
+    - "Released when display is torn down (no accumulation across reconnects)"
+    - "Correct on multi-display setups where displays have different colorspaces"
+    - "Lifecycle tied to owning object (easier to reason about)"
+  costs:
+    - "Requires adding a field to NsDisplayInfo struct (nsterm.h change)"
+    - "Requires passing dpyinfo to +colorWithUnsignedLong: or accessing via selected_frame"
+    - "Multiple displays each have their own cache (memory multiplied by display count)"
+    - "Accessing dpyinfo from an Obj-C class method requires indirection through selected_frame"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

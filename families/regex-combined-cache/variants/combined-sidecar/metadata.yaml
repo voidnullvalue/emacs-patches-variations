@@ -1,0 +1,45 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-combined-cache-combined-sidecar
+family: regex-combined-cache
+title: "Combined regex cache in one separately allocated sidecar (cross-family)"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+design_dimensions:
+  storage: "one xmalloc for combined sidecar containing both subcaches"
+  struct_size_bytes: 386
+  allocation_per_pattern: 1
+  struct_overhead_in_re_pattern_buffer: "pointer only (8 bytes)"
+  vs_baseline_inline: "baseline embeds 384+ bytes inline; sidecar reduces struct by 376 bytes"
+  partial_initialization: "syntax_valid and translate_valid set independently"
+  failure_handling: "xfree in all error exit paths; NULL assignment prevents double-free"
+  reuse: "existing sidecar reused on recompile; validity flags reset before re-populate"
+  null_check_in_macro: true
+dependencies: []
+conflicts:
+  - regex-combined-cache-baseline
+  - regex-combined-cache-unified-generation
+  - regex-combined-cache-search-path-hook
+  - regex-combined-cache-per-character-struct
+  - regex-combined-cache-packed-entry
+  - regex-combined-cache-independently-lazy
+expected_tradeoffs:
+  benefits:
+    - "Single allocation covers both syntax and translate subcaches"
+    - "re_pattern_buffer struct shrinks by ~376 bytes"
+    - "One xfree in cleanup (vs two for separate sidecars)"
+    - "Partial initialization supported: subcache valid flags are independent"
+  costs:
+    - "One xmalloc per compiled pattern"
+    - "Extra pointer dereference in every SYNTAX_TRU and TRANSLATE_TRU call"
+    - "Error-path xfree must be placed in all early-exit paths"
+    - "xmalloc in Emacs aborts on failure rather than returning NULL"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

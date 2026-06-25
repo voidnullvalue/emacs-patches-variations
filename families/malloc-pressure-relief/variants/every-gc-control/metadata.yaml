@@ -1,0 +1,42 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: malloc-pressure-relief-every-gc-control
+family: malloc-pressure-relief
+title: "Malloc-zone pressure relief after every GC — benchmark control/reference design"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/alloc.c: 5fc166dbc2"
+files_modified:
+  - src/alloc.c
+design_dimensions:
+  trigger_policy: "unconditional after every completed GC"
+  timing: "synchronous — end of garbage_collect()"
+  rate_limit: "none"
+  purpose: "benchmark control/reference — establishes max-benefit and max-latency bounds"
+  counters: "everygc_compact_count, everygc_bytes_returned, everygc_latency_us"
+  expected_latency_per_call_ms: "1-50 (heap-size dependent)"
+dependencies: []
+conflicts:
+  - malloc-pressure-relief-baseline
+  - malloc-pressure-relief-background-dispatch
+  - malloc-pressure-relief-adaptive-threshold
+  - malloc-pressure-relief-manual-lisp-primitive
+  - malloc-pressure-relief-idle-triggered
+  - malloc-pressure-relief-freed-byte-goal
+  - malloc-pressure-relief-effectiveness-backoff
+expected_tradeoffs:
+  benefits:
+    - "Maximum possible RSS reduction: every GC is followed by compaction"
+    - "Provides reference upper bound for compaction benefit"
+    - "Cumulative latency counter shows total overhead cost"
+    - "Simplest possible trigger policy: no threshold logic to reason about"
+  costs:
+    - "Adds synchronous latency to every single GC (1-50 ms per GC)"
+    - "On GC-heavy workloads accumulates substantial overhead per session"
+    - "Not suitable for production without benchmark evidence"
+    - "No protection against pathological workloads with high GC frequency"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

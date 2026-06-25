@@ -1,0 +1,43 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-combined-cache-per-character-struct
+family: regex-combined-cache
+title: "Combined regex cache using per-character struct with independent validity bits"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+design_dimensions:
+  structure: "Array of Structs (AoS) — one ReCharEntry per ASCII character"
+  vs_baseline: "baseline uses two separate arrays (SoA); this uses one struct array"
+  entry_layout: "unsigned char syntax + unsigned char translate + 2 bool validity bits"
+  independent_validity: "each character has syntax_valid and translate_valid independently"
+  cache_size_bytes: 512
+  outer_validity: "re_char_cache_valid guards all per-entry checks"
+  partial_invalidation: "syntax subcache can be invalidated while translate subcache remains valid"
+dependencies: []
+conflicts:
+  - regex-combined-cache-baseline
+  - regex-combined-cache-unified-generation
+  - regex-combined-cache-search-path-hook
+  - regex-combined-cache-packed-entry
+  - regex-combined-cache-independently-lazy
+  - regex-combined-cache-combined-sidecar
+expected_tradeoffs:
+  benefits:
+    - "Independent per-character validity: syntax can be valid while translate is not"
+    - "Single struct type encapsulates both subcaches"
+    - "memset to zero initializes all validity bits safely"
+    - "AoS layout: both fields for character C are adjacent in memory"
+  costs:
+    - "512 bytes in re_pattern_buffer (vs 384 bytes for baseline combined)"
+    - "Three validity checks per SYNTAX_TRU / TRANSLATE_TRU call (outer + per-entry)"
+    - "struct padding may increase size (depends on compiler ABI)"
+    - "No static assertion on struct size included in patch"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

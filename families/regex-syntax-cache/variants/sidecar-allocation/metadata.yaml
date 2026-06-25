@@ -1,0 +1,43 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-syntax-cache-sidecar-allocation
+family: regex-syntax-cache
+title: "Regex syntax cache in separately allocated sidecar (pointer in re_pattern_buffer)"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+design_dimensions:
+  storage: "separately allocated sidecar struct (xmalloc)"
+  struct_overhead: "pointer only (8 bytes on LP64) vs 128 bytes inline"
+  allocation_per_pattern: 1
+  reuse_policy: "sidecar reused across recompilations of same buffer"
+  null_check_in_macro: true
+  failure_handling: "xfree sidecar in all error exit paths"
+  double_free_prevention: "set pointer to NULL after xfree"
+  stale_pointer_avoidance: "NULL check in SYNTAX_TRU macro"
+dependencies: []
+conflicts:
+  - regex-syntax-cache-baseline
+  - regex-syntax-cache-global-epoch
+  - regex-syntax-cache-lazy-no-presexp-guard
+  - regex-syntax-cache-single-byte-256
+  - regex-syntax-cache-syntax-table-generation
+  - regex-syntax-cache-specialized-ascii-matcher
+expected_tradeoffs:
+  benefits:
+    - "re_pattern_buffer struct shrinks by 127 bytes (pointer vs 128 bytes)"
+    - "Many patterns never need syntax cache — no memory allocated until needed"
+    - "Sidecar can be freed independently of the pattern buffer"
+  costs:
+    - "One xmalloc per compiled pattern (added allocation cost)"
+    - "Extra pointer dereference on every SYNTAX_TRU call"
+    - "Error-path cleanup requires xfree in multiple locations"
+    - "Reuse across recompilations requires NULL-check before allocation"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

@@ -1,0 +1,46 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: malloc-pressure-relief-effectiveness-backoff
+family: malloc-pressure-relief
+title: "Malloc-zone pressure relief with exponential backoff on low-yield compactions"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/alloc.c: 5fc166dbc2"
+files_modified:
+  - src/alloc.c
+design_dimensions:
+  trigger_policy: "threshold + adaptive periodic interval with exponential backoff"
+  backoff_algorithm: "double GC interval after BACKOFF_N_INEFFECTIVE_MAX=3 consecutive low-yield compactions; reset after significant release"
+  gc_interval_range: "[64, 512] — initial 64, doubles up to cap of 512"
+  low_yield_threshold_bytes: 65536
+  ineffective_streak_cap: 3
+  overflow_protection: "interval doubled only if <= MAX/2; else clamped to MAX"
+  reset_condition: "any compaction returning >= 64 KB resets interval to 64"
+  counters: "backoff_compacts_done, backoff_bytes_returned, backoff_gc_interval (readable)"
+  independent_testability: "backoff_update() is exported for unit testing without GC"
+dependencies: []
+conflicts:
+  - malloc-pressure-relief-baseline
+  - malloc-pressure-relief-background-dispatch
+  - malloc-pressure-relief-adaptive-threshold
+  - malloc-pressure-relief-manual-lisp-primitive
+  - malloc-pressure-relief-idle-triggered
+  - malloc-pressure-relief-every-gc-control
+  - malloc-pressure-relief-freed-byte-goal
+expected_tradeoffs:
+  benefits:
+    - "Reduces compaction frequency on low-yield workloads automatically"
+    - "Reset mechanism allows quick recovery when workload shifts to high-yield"
+    - "No floating-point: backoff uses integer doubling"
+    - "Policy is independently testable via backoff_update()"
+    - "Bounded interval [64, 512] prevents both over-compaction and indefinite suppression"
+  costs:
+    - "More complex than baseline: interval state + streak counter"
+    - "Backoff may suppress useful compactions if low-yield streak is transient"
+    - "Interval resets on any meaningful release, which may be frequent on mixed workloads"
+    - "backoff_gc_interval is not exposed as a DEFVAR; inspect via debugger only"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

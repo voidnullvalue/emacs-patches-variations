@@ -1,0 +1,42 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-syntax-cache-specialized-ascii-matcher
+family: regex-syntax-cache
+title: "Regex syntax cache used via specialized ASCII matcher entry (pre-match dispatch)"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+design_dimensions:
+  integration_point: "matcher entry point (re_match_2_select dispatch before re_match_2_internal)"
+  specialization: "unibyte patterns with word-boundary opcodes, flat array syntax lookup"
+  dispatch_preconditions: "!RE_MULTIBYTE_P(bufp) && syntax_ascii_valid && !parse_sexp_lookup_properties"
+  fallback: "re_match_2_internal for any non-qualifying pattern or opcode"
+  vs_baseline: "baseline inserts SYNTAX_TRU at call sites within general matcher; this variant dispatches before entering matcher"
+  opcode_coverage: "word-boundary opcodes (wordbound, notwordbound, wordbeg, wordend)"
+dependencies: []
+conflicts:
+  - regex-syntax-cache-baseline
+  - regex-syntax-cache-global-epoch
+  - regex-syntax-cache-lazy-no-presexp-guard
+  - regex-syntax-cache-single-byte-256
+  - regex-syntax-cache-sidecar-allocation
+  - regex-syntax-cache-syntax-table-generation
+expected_tradeoffs:
+  benefits:
+    - "Avoids modifying the general matcher's opcode dispatch loop"
+    - "Specialized path can use direct array access without macro overhead"
+    - "Differential testing between specialized and general paths is natural"
+    - "General matcher left unchanged — no risk of breaking non-ASCII paths"
+  costs:
+    - "Dispatch logic at entry adds one indirection (re_match_2_select wrapper)"
+    - "Pattern feasibility scan needed to verify all opcodes qualify for specialization"
+    - "Code duplication risk if the word-boundary logic in the fast path diverges from general matcher"
+    - "Mixed patterns (ASCII + non-ASCII) always use slow path"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

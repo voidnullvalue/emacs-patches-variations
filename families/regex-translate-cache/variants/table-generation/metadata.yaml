@@ -1,0 +1,41 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-translate-cache-table-generation
+family: regex-translate-cache
+title: "Regex translate cache validated by translate-table Lisp object identity (EQ)"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+design_dimensions:
+  validation: "EQ comparison of translate table Lisp object identity"
+  rebuild_trigger: "different translate table object (EQ mismatch)"
+  known_limitation: "in-place mutation of existing table not detected by identity comparison"
+  vs_boolean_flag: "table identity detects replacement; bool flag does not"
+  nil_handling: "trt_built_for = Qnil when no translate table; EQ(Qnil, translate) when translate is nil matches"
+  struct_addition: "Lisp_Object trt_built_for field in re_pattern_buffer"
+dependencies: []
+conflicts:
+  - regex-translate-cache-baseline
+  - regex-translate-cache-lazy-bitmap
+  - regex-translate-cache-wide-entry
+  - regex-translate-cache-ascii-128
+  - regex-translate-cache-sidecar-allocation
+  - regex-translate-cache-identity-sentinel
+expected_tradeoffs:
+  benefits:
+    - "Automatically detects when search uses a different translate table (replacement)"
+    - "No explicit recompile required after table replacement — detected at match time"
+    - "More precise than bool flag: bool becomes stale silently; EQ catches replacement"
+  costs:
+    - "In-place table mutation NOT detected (requires char-table generation counter)"
+    - "Lisp_Object in re_pattern_buffer requires GC awareness (struct on non-GC heap)"
+    - "EQ comparison on every TRANSLATE_TRU call in the hot path"
+    - "trt_built_for field adds sizeof(Lisp_Object) = 8 bytes to re_pattern_buffer"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

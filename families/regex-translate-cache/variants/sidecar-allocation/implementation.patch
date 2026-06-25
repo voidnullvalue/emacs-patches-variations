@@ -1,0 +1,64 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: sidecar allocation — translate cache in separately allocated storage
+# Materially different from baseline: storage location is heap-allocated sidecar;
+# struct overhead is one pointer instead of 256 bytes inline;
+# ownership model requires explicit free on regfree and compilation failure.
+diff --git a/src/regex-emacs.c b/src/regex-emacs.c
+index d8ed8a462a..0000000000 100644
+--- a/src/regex-emacs.c
++++ b/src/regex-emacs.c
+@@ -1196,6 +1196,16 @@
+ #define RE_TRANSLATE(TBL, C) char_table_translate (TBL, C)
+ #define TRANSLATE(d) (!NILP (translate) ? RE_TRANSLATE (translate, d) : (d))
+
++/* Translation fast path via sidecar-allocated cache.
++   Checks sidecar pointer (NULL before first allocation) and valid flag.  */
++#define TRANSLATE_TRU(C)						\
++  ((bufp->translate_sidecar && bufp->translate_sidecar->valid		\
++    && (unsigned) (C) < 128)						\
++   ? (int) bufp->translate_sidecar->trt[(unsigned char) (C)]		\
++   : TRANSLATE (C))
++
+
+diff --git a/src/regex-emacs.h b/src/regex-emacs.h
+index bcfff662f7..0000000000 100644
+--- a/src/regex-emacs.h
++++ b/src/regex-emacs.h
+@@ -XXXX,X +XXXX,X @@
++/* Sidecar struct for translate cache (defined before re_pattern_buffer).  */
++struct re_translate_sidecar
++{
++  unsigned char trt[256];   /* translations for byte codes 0-255 */
++  bool          valid;      /* true when trt[] is populated */
++  Lisp_Object   table_ref;  /* translate table at build time (for stale detection) */
++};
++
+ struct re_pattern_buffer
+ {
+-  unsigned char trt_ascii[256];
+-  bool_bf trt_ascii_valid : 1;
++  struct re_translate_sidecar *translate_sidecar;   /* NULL until allocated */
+
+@@ -XXXX,X +XXXX,X @@ re_compile_pattern allocation and population:
++  /* Allocate or reuse sidecar.  */
++  if (!bufp->translate_sidecar)
++    bufp->translate_sidecar = xmalloc (sizeof (struct re_translate_sidecar));
++  bufp->translate_sidecar->valid = false;
++
++  if (!NILP (translate))
++    {
++      for (int i = 0; i < 256; i++)
++        {
++          int t = char_table_translate (translate, i);
++          bufp->translate_sidecar->trt[i] =
++            (CHAR_TO_BYTE_SAFE (t) == t) ? (unsigned char) t : (unsigned char) i;
++        }
++      bufp->translate_sidecar->valid = true;
++      bufp->translate_sidecar->table_ref = translate;
++    }
++  else
++    bufp->translate_sidecar->table_ref = Qnil;
++
++/* In regfree() and all error exit paths: */
++  xfree (bufp->translate_sidecar);
++  bufp->translate_sidecar = NULL;

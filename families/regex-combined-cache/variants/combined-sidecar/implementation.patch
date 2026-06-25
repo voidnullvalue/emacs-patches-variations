@@ -1,0 +1,84 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+# Variant: combined-sidecar — both caches in one separately allocated sidecar object
+# Materially different from baseline: allocation strategy is one xmalloc for both
+# subcaches combined; struct overhead is one pointer instead of 384+ bytes inline;
+# ownership model requires explicit free on regfree and compilation failure.
+diff --git a/src/regex-emacs.c b/src/regex-emacs.c
+index d8ed8a462a..0000000000 100644
+--- a/src/regex-emacs.c
++++ b/src/regex-emacs.c
+@@ -50,6 +50,18 @@
+ /* Explicit syntax lookup using the buffer-local table.  */
+ #define BUFFER_SYNTAX(c) syntax_property (c, 0)
+
++/* Combined sidecar cache macros.  NULL-check on combined_cache guards
++   against use before first compilation.  */
++#define SYNTAX_TRU(c)							\
++  ((bufp->combined_cache && bufp->combined_cache->syntax_valid		\
++    && (unsigned) (c) < 128)						\
++   ? (enum syntaxcode) bufp->combined_cache->syntax[(unsigned char) (c)] \
++   : SYNTAX (c))
++
++#define TRANSLATE_TRU(C)						\
++  ((bufp->combined_cache && bufp->combined_cache->translate_valid	\
++    && (unsigned) (C) < 128)						\
++   ? (int) bufp->combined_cache->translate[(unsigned char) (C)]		\
++   : TRANSLATE (C))
++
+
+diff --git a/src/regex-emacs.h b/src/regex-emacs.h
+index bcfff662f7..0000000000 100644
+--- a/src/regex-emacs.h
++++ b/src/regex-emacs.h
+@@ -XXXX,X +XXXX,X @@
++/* Combined sidecar struct: one xmalloc covers both subcaches.
++   Total size: 128 + 256 + 2 bools = ~386 bytes.  */
++struct re_combined_sidecar
++{
++  unsigned char syntax[128];      /* syntax codes for ASCII 0-127 */
++  unsigned char translate[256];   /* translated values for byte codes 0-255 */
++  bool          syntax_valid;
++  bool          translate_valid;
++};
++
+ struct re_pattern_buffer
+ {
+-  unsigned char syntax_ascii[128];
+-  bool_bf syntax_ascii_valid : 1;
+-  unsigned char trt_ascii[256];
+-  bool_bf trt_ascii_valid : 1;
++  struct re_combined_sidecar *combined_cache;   /* NULL until allocated */
+
+@@ -XXXX,X +XXXX,X @@ re_compile_pattern: allocation and population:
++  /* Allocate or reuse sidecar.  */
++  if (!bufp->combined_cache)
++    bufp->combined_cache = xmalloc (sizeof (struct re_combined_sidecar));
++
++  /* Reset validity flags before repopulating.  */
++  bufp->combined_cache->syntax_valid = false;
++  bufp->combined_cache->translate_valid = false;
++
++  /* Populate syntax subcache.  */
++  if (!parse_sexp_lookup_properties)
++    {
++      for (int i = 0; i < 128; i++)
++        bufp->combined_cache->syntax[i] =
++          (unsigned char) syntax_property (i, 0);
++      bufp->combined_cache->syntax_valid = true;
++    }
++
++  /* Populate translate subcache.  */
++  if (!NILP (translate))
++    {
++      for (int i = 0; i < 256; i++)
++        {
++          int t = char_table_translate (translate, i);
++          bufp->combined_cache->translate[i] =
++            (CHAR_TO_BYTE_SAFE (t) == t) ? (unsigned char) t : (unsigned char) i;
++        }
++      bufp->combined_cache->translate_valid = true;
++    }
++
++/* In regfree() and all error exit paths: */
++  xfree (bufp->combined_cache);
++  bufp->combined_cache = NULL;

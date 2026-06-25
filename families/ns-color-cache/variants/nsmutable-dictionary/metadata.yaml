@@ -1,0 +1,47 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: ns-color-cache-nsmutable-dictionary
+family: ns-color-cache
+title: "NSColor cache backed by NSMutableDictionary (keyed by NSNumber-wrapped pixel)"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/nsterm.m: a7f3fc292c"
+files_modified:
+  - src/nsterm.m
+design_dimensions:
+  cache_structure: "NSMutableDictionary"
+  key_type: "NSNumber (unsigned long) — @((unsigned long)c) boxed literal"
+  eviction_policy: "none — unbounded growth"
+  ownership: "NSDictionary retains values; keys are copied (NSNumber is immutable)"
+  lifetime: "process lifetime; teardown via ns_color_dict_teardown"
+  scope: "global"
+  thread_safety: "NSMutableDictionary is not thread-safe; NS drawing is single-threaded"
+  initialization: "ns_color_dict_init() called from ns_initialize_display_info"
+  teardown: "ns_color_dict_teardown() called from ns_term_shutdown"
+dependencies: []
+conflicts:
+  - ns-color-cache-baseline
+  - ns-color-cache-open-addressing
+  - ns-color-cache-per-frame
+  - ns-color-cache-counted-lru
+  - ns-color-cache-single-entry-hot-cache
+  - ns-color-cache-two-way-set-associative
+  - ns-color-cache-nscache
+  - ns-color-cache-per-display-backend
+expected_tradeoffs:
+  benefits:
+    - "No hand-written hash function — NSDictionary manages hashing and collision resolution"
+    - "Correct retain/release semantics handled by Foundation collection"
+    - "No fixed-size limit; accommodates any number of distinct colors without collisions"
+    - "Minimal code to audit for correctness"
+  costs:
+    - "Unbounded growth if many unique colors are used (image editing, etc.)"
+    - "Each key allocation boxes an unsigned long into an NSNumber (small allocation per miss)"
+    - "NSDictionary internal bookkeeping is heavier than a flat C array"
+    - "Not suitable for memory-constrained builds without an eviction policy"
+    - "Not a recommended production design without benchmark evidence"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

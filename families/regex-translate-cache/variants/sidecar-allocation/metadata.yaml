@@ -1,0 +1,44 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-translate-cache-sidecar-allocation
+family: regex-translate-cache
+title: "Regex translate cache in separately allocated sidecar (pointer in re_pattern_buffer)"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+design_dimensions:
+  storage: "separately allocated sidecar struct (xmalloc)"
+  struct_overhead: "pointer only (8 bytes on LP64) vs 256 bytes inline"
+  allocation_per_pattern: 1
+  reuse_policy: "sidecar allocation reused across recompilations"
+  table_ref: "Lisp_Object field for stale-translation-table detection"
+  null_check_in_macro: true
+  failure_handling: "xfree in all error exit paths of re_compile_pattern"
+  double_free_prevention: "pointer set to NULL after xfree"
+dependencies: []
+conflicts:
+  - regex-translate-cache-baseline
+  - regex-translate-cache-lazy-bitmap
+  - regex-translate-cache-wide-entry
+  - regex-translate-cache-ascii-128
+  - regex-translate-cache-identity-sentinel
+  - regex-translate-cache-table-generation
+expected_tradeoffs:
+  benefits:
+    - "re_pattern_buffer struct shrinks by 255 bytes (pointer vs 256 bytes)"
+    - "Patterns without case-folding never allocate sidecar"
+    - "Sidecar can be freed independently of pattern buffer"
+    - "table_ref field enables stale-detection without additional struct field"
+  costs:
+    - "One xmalloc per compiled pattern that uses translation"
+    - "Extra pointer dereference on every TRANSLATE_TRU call"
+    - "Error-path cleanup requires xfree in multiple locations"
+    - "table_ref is a Lisp_Object — GC must be aware if sidecar is not visible to GC mark"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"

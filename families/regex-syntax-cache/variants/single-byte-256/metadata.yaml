@@ -1,0 +1,43 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+id: regex-syntax-cache-single-byte-256
+family: regex-syntax-cache
+title: "Regex syntax cache extended to 256 entries (byte codes 0-255)"
+llm_assisted: true
+llm_system: "Codex"
+human_review_status: "not-reviewed"
+base_emacs_revision: "unknown — see BASELINE.md; blob src/regex-emacs.c: d8ed8a462a"
+files_modified:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+design_dimensions:
+  cache_size: 256
+  coverage: "byte codes 0-255"
+  entry_type: "unsigned char"
+  macro_guard: "(unsigned)(c) < 256"
+  memory_bytes_added_to_struct: 256
+  vs_baseline: "128 more bytes in struct; covers unibyte high-byte range (128-255)"
+  population_calls: 256
+  unibyte_behavior: "covers all 256 byte codes; no slow-path for 128-255"
+  multibyte_behavior: "256 comparisons cover byte values even in multibyte sequences"
+dependencies: []
+conflicts:
+  - regex-syntax-cache-baseline
+  - regex-syntax-cache-global-epoch
+  - regex-syntax-cache-lazy-no-presexp-guard
+  - regex-syntax-cache-sidecar-allocation
+  - regex-syntax-cache-syntax-table-generation
+  - regex-syntax-cache-specialized-ascii-matcher
+expected_tradeoffs:
+  benefits:
+    - "Eliminates slow path for all 256 byte codes, not just ASCII"
+    - "No branch for codes 128-255 in unibyte word-boundary checks"
+    - "Useful for unibyte buffers with high-byte characters"
+  costs:
+    - "128 extra bytes in re_pattern_buffer per compiled pattern"
+    - "128 extra syntax_property() calls at compile time"
+    - "Negligible benefit in multibyte buffers (128-255 rarely as standalone bytes)"
+normalized_patch_sha256: "not-computed"
+apply_status: "design-space variant — not tested against Emacs source"
+build_status: "not-tested"
+test_status: "not-tested"
+benchmark_status: "not-tested"
