@@ -10,11 +10,36 @@ contributions, the patches here are not presented as suitable for upstream submi
 LLM provenance is deliberately disclosed rather than hidden.
 See [PROVENANCE.md](PROVENANCE.md) for the full provenance statement.
 
-> **Project status: complete public record.**
-> This repository has made the policy point it was created to document.
-> No upstream submissions, automated submissions, maintainer-directed
-> campaign, or further outreach are planned. The project is not intended
-> to interfere with, delay, or obstruct Emacs development.
+**GNU Emacs does not accept LLM-assisted contributions.** Nothing here is intended
+for or suitable for upstream submission. See upstream policy in PROVENANCE.md.
+s/i\(dea\).*/\1/
+---
+This repository is retained as a public, timestamped, explicitly LLM-assisted research artifact. It is sufficient for its intended purpose: demonstrating that a categorical policy against LLM-assisted contributions can exclude concrete patches, tests, benchmarks, and conventional alternative designs.
+
+It is not a campaign against Emacs maintainers, not a claim over the underlying ideas, and not an attempt to prevent or delay independent development. No additional upstream-facing action is planned.
+::: 
+
+
+
+## Important Disclosures
+
+- **All content is LLM-assisted.** No patch or document was written by a human author
+  independently. Human involvement was limited to direction and final decisions.
+- **These patches are not upstreamable** under current GNU Emacs policy, which as
+  publicly applied to LLM-assisted contributions, does not accept them.
+- **Specifications vs. verified fixes:** 33 of the 38 patch artifacts are design
+  specifications (marked `index 0000000000` in the diff header). Only the 5 baseline
+  patches are real applicable diffs; see PATCH_READINESS_AUDIT.md.
+- **Builds not verified on this host:** Build is blocked by missing autoconf and
+  libncurses-dev. All git apply --check passes are verified; actual Emacs compilation
+  is not.
+- **Bug coverage is reported separately** from raw patch counts.
+  See [BUG_COVERAGE.md](BUG_COVERAGE.md).
+- **Pull requests are welcome** for additional materially distinct, LLM-generated or
+  substantially LLM-assisted patches. All contributions must disclose LLM provenance.
+  Cosmetic variants and duplicate diffs are rejected.
+- **This repository does not claim ownership** over any ideas or prevent independent
+  implementation of the same optimizations by others.
 
 ---
 
@@ -123,7 +148,7 @@ validation) was not reached for any item. See [BUG_COVERAGE.md](BUG_COVERAGE.md)
 
 All baseline patches apply to Emacs commit `3ca168b80ae6d7b25fe55784dde3ad24faff7be2`
 (Emacs 31 development, 2026-06-23). See [BASELINE.md](BASELINE.md) and
-[PATCH_READINESS_AUDIT.md](PATCH_READINESS_AUDIT.md) for per-patch detail including
+[PATCH_READINESS_AUDIT.md](PATCH_READINESS_AUDIT.md) for per-patch detail includings/i\(dea\).*/\1/
 which baselines are reconstructed and may require `--fuzz`.
 
 ```sh
