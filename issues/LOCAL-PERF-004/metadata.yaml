@@ -1,0 +1,37 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-26
+# Human review status: not-reviewed
+
+id: LOCAL-PERF-004
+title: "Per-call NSColor allocation and colorspace conversion in +colorWithUnsignedLong:"
+classification: performance-pathology
+source: source-analysis
+upstream_reference: null
+affected_revision: "3ca168b80ae6d7b25fe55784dde3ad24faff7be2"
+nearest_release: "emacs-31.0.90 + 350 commits"
+platforms:
+  - macos
+files_involved:
+  - src/nsterm.m
+reproduction_command: "sh issues/LOCAL-PERF-004/reproduce.sh"
+baseline_status: blocked
+candidate_fixes:
+  primary: "families/ns-color-cache/baseline/implementation.patch"
+  alternative: "families/ns-color-cache/variants/nscache/implementation.patch (SPECIFICATION)"
+regression_test: "issues/LOCAL-PERF-004/tests/test_cache_logic.c"
+benchmark: "issues/LOCAL-PERF-004/benchmarks/bench_cache_logic.c"
+llm_assisted: true
+llm_system: "Claude Code"
+llm_model: "claude-sonnet-4-6"
+human_review_status: not-reviewed
+apply_status: passed
+build_status: blocked
+test_status: passed
+benchmark_status: blocked
+known_limitations:
+  - "Platform-blocked: src/nsterm.m is Objective-C and requires macOS SDK and clang ObjC support."
+  - "git apply --check passes on Linux (patch tool only inspects text)."
+  - "No macOS build environment available on this host; all tests are blocked."
+  - "Cache logic (hash function, array lookup) can be tested in pure C without ObjC; see test_cache_logic.c."
+  - "NSColor allocation and colorspace conversion timing can only be measured on macOS."
+  - "32768-slot process-lifetime cache: no memory reclamation after display disconnect."
+  - "Cache misses are silent (return uncached color); collision probability depends on face color distribution."

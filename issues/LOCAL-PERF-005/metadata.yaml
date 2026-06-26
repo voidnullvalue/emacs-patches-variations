@@ -1,0 +1,36 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-26
+# Human review status: not-reviewed
+
+id: LOCAL-PERF-005
+title: "RSS ratchet from malloc zone free-list accumulation after Emacs GC on macOS"
+classification: performance-pathology
+source: source-analysis
+upstream_reference: null
+affected_revision: "3ca168b80ae6d7b25fe55784dde3ad24faff7be2"
+nearest_release: "emacs-31.0.90 + 350 commits"
+platforms:
+  - macos
+files_involved:
+  - src/alloc.c
+reproduction_command: "sh issues/LOCAL-PERF-005/reproduce.sh"
+baseline_status: blocked
+candidate_fixes:
+  primary: "families/malloc-pressure-relief/baseline/implementation.patch"
+  alternative: "families/malloc-pressure-relief/variants/idle-triggered/implementation.patch (SPECIFICATION)"
+regression_test: "issues/LOCAL-PERF-005/tests/test_threshold_logic.c"
+benchmark: "issues/LOCAL-PERF-005/benchmarks/bench_threshold_gate.c"
+llm_assisted: true
+llm_system: "Claude Code"
+llm_model: "claude-sonnet-4-6"
+human_review_status: not-reviewed
+apply_status: passed
+build_status: blocked
+test_status: passed
+benchmark_status: not-run
+known_limitations:
+  - "Platform-blocked for malloc_zone_pressure_relief: macOS only (HAVE_MALLOC_MALLOC_H)."
+  - "git apply --check passes on Linux (patch applies cleanly; #ifdef guards make it a no-op)."
+  - "The alloc.c patch IS cross-platform compilable; the HAVE_MALLOC_MALLOC_H guard means it compiles as a no-op on Linux."
+  - "Threshold logic (freed_bytes gate, rate limiter) is tested in isolation without macOS APIs."
+  - "RSS measurement requires macOS vm_stat or /proc/smaps; memory behavior requires macOS allocator."
+  - "malloc_zone_pressure_relief is not a moving collector; does not fix internal fragmentation."

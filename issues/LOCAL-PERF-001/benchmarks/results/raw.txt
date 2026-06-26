@@ -1,0 +1,64 @@
+=== LOCAL-PERF-001 benchmark: syntax_property overhead ===
+Host:      Linux (see /proc/cpuinfo for CPU details)
+Warmup:    5 runs
+Measured:  10 runs
+Iters/run: 100000000
+
+Warming up...
+Measuring unpatched (slow path)...
+  run  1: 0.1252 s (1.25 ns/op)
+  run  2: 0.1228 s (1.23 ns/op)
+  run  3: 0.1245 s (1.25 ns/op)
+  run  4: 0.1227 s (1.23 ns/op)
+  run  5: 0.1230 s (1.23 ns/op)
+  run  6: 0.1237 s (1.24 ns/op)
+  run  7: 0.1245 s (1.24 ns/op)
+  run  8: 0.1243 s (1.24 ns/op)
+  run  9: 0.1229 s (1.23 ns/op)
+  run 10: 0.1207 s (1.21 ns/op)
+Measuring patched (fast path)...
+  run  1: 0.0684 s (0.68 ns/op)
+  run  2: 0.0622 s (0.62 ns/op)
+  run  3: 0.0616 s (0.62 ns/op)
+  run  4: 0.0619 s (0.62 ns/op)
+  run  5: 0.0719 s (0.72 ns/op)
+  run  6: 0.0619 s (0.62 ns/op)
+  run  7: 0.0602 s (0.60 ns/op)
+  run  8: 0.0601 s (0.60 ns/op)
+  run  9: 0.0617 s (0.62 ns/op)
+  run 10: 0.0616 s (0.62 ns/op)
+
+=== Summary ===
+Variant                         Median(s)    Mean(s)   Stdev(s)      ns/op
+unpatched (slow path)              0.1233     0.1234     0.0013       1.23
+patched (fast path)                0.0618     0.0631     0.0038       0.62
+Speedup (median): 2.00x
+
+=== JSON ===
+{
+  "issue": "LOCAL-PERF-001",
+  "revision": "3ca168b80ae6d7b25fe55784dde3ad24faff7be2",
+  "patch": "families/regex-syntax-cache/baseline/implementation.patch",
+  "machine": "see uname -sr",
+  "os": "Linux",
+  "compiler": "cc (see cc --version)",
+  "configure_flags": ["standalone-C-benchmark"],
+  "iterations_per_run": 100000000,
+  "warmup_runs": 5,
+  "measured_runs": 10,
+  "slow_path": {
+    "samples": [0.120686, 0.122683, 0.122800, 0.122906, 0.122978, 0.123655, 0.124338, 0.124487, 0.124510, 0.125166],
+    "median": 0.123316,
+    "mean": 0.123421,
+    "stdev": 0.001297,
+    "units": "seconds"
+  },
+  "fast_path": {
+    "samples": [0.060114, 0.060213, 0.061562, 0.061597, 0.061694, 0.061852, 0.061871, 0.062162, 0.068375, 0.071900],
+    "median": 0.061773,
+    "mean": 0.063134,
+    "stdev": 0.003845,
+    "units": "seconds"
+  },
+  "speedup_median": 1.9963
+}

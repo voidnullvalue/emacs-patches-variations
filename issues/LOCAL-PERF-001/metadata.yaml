@@ -1,0 +1,38 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-26
+# Human review status: not-reviewed
+
+id: LOCAL-PERF-001
+title: "Repeated syntax_property calls for ASCII characters in regex word-boundary opcodes"
+classification: performance-pathology
+source: source-analysis
+upstream_reference: null
+affected_revision: "3ca168b80ae6d7b25fe55784dde3ad24faff7be2"
+nearest_release: "emacs-31.0.90 + 350 commits"
+platforms:
+  - linux
+  - macos
+  - all
+files_involved:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+reproduction_command: "sh issues/LOCAL-PERF-001/reproduce.sh"
+baseline_status: passed
+candidate_fixes:
+  primary: "families/regex-syntax-cache/baseline/implementation.patch"
+  alternative: "families/regex-syntax-cache/variants/global-epoch/implementation.patch (SPECIFICATION)"
+regression_test: "issues/LOCAL-PERF-001/tests/test_regression.c"
+benchmark: "issues/LOCAL-PERF-001/benchmarks/bench_syntax_overhead.c"
+llm_assisted: true
+llm_system: "Claude Code"
+llm_model: "claude-sonnet-4-6"
+human_review_status: not-reviewed
+apply_status: passed
+build_status: blocked
+test_status: passed
+benchmark_status: passed
+known_limitations:
+  - "Build status blocked: no autoconf or libncurses-dev on this Linux host; git apply --check passes against base commit."
+  - "Benchmark is a standalone C microbenchmark; no full Emacs binary required."
+  - "SYNTAX_TRU is guarded by parse_sexp_lookup_properties; will not engage when text properties set per-character syntax."
+  - "Cache is invalidated by pattern recompilation; rapid syntax table changes may disable the cache."
+  - "Only ASCII (code < 128) is cached; Unicode characters always take the slow path."

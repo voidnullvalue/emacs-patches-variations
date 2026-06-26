@@ -1,0 +1,8 @@
+# git apply --check log for LOCAL-PERF-005
+# Date: 2026-06-26
+# Base commit: 3ca168b80ae6d7b25fe55784dde3ad24faff7be2
+# Patch: families/malloc-pressure-relief/baseline/implementation.patch
+# Command: git -C /tmp/emacs-src-worktree apply --check --verbose families/malloc-pressure-relief/baseline/implementation.patch
+# Exit code: 0
+
+Checking patch src/alloc.c...

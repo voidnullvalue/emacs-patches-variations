@@ -1,0 +1,38 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-26
+# Human review status: not-reviewed
+
+id: LOCAL-PERF-003
+title: "Structural conflict when composing regex syntax and translate caches; combined overhead"
+classification: performance-pathology
+source: source-analysis
+upstream_reference: null
+affected_revision: "3ca168b80ae6d7b25fe55784dde3ad24faff7be2"
+nearest_release: "emacs-31.0.90 + 350 commits"
+platforms:
+  - linux
+  - macos
+  - all
+files_involved:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+reproduction_command: "sh issues/LOCAL-PERF-003/reproduce.sh"
+baseline_status: passed
+candidate_fixes:
+  primary: "families/regex-combined-cache/baseline/implementation.patch"
+  alternative: "families/regex-combined-cache/variants/unified-generation/implementation.patch (SPECIFICATION)"
+regression_test: "issues/LOCAL-PERF-003/tests/test_regression.c"
+benchmark: "issues/LOCAL-PERF-003/benchmarks/bench_combined_overhead.c"
+llm_assisted: true
+llm_system: "Claude Code"
+llm_model: "claude-sonnet-4-6"
+human_review_status: not-reviewed
+apply_status: passed
+build_status: blocked
+test_status: passed
+benchmark_status: passed
+known_limitations:
+  - "Build status blocked: no autoconf or libncurses-dev on this host."
+  - "The baseline patch was regenerated on 2026-06-26 to fix corruption in the original ascii_caches_combined_0001.patch."
+  - "The SYNTAX_TRU and TRANSLATE_TRU caches are independent; no unified generation counter."
+  - "Both caches share the same re_compile_pattern initialization point; init order matters."
+  - "Combined struct overhead: 256+128+2 bytes = 386 bytes added per re_pattern_buffer."

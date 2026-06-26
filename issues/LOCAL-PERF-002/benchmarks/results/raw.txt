@@ -1,0 +1,42 @@
+=== LOCAL-PERF-002 benchmark: char_table_translate overhead ===
+Warmup: 5  Measured: 10  Iters/run: 100000000
+
+Unpatched (slow path):
+  run  1: 0.1288s (1.29ns/op)
+  run  2: 0.1209s (1.21ns/op)
+  run  3: 0.1210s (1.21ns/op)
+  run  4: 0.1195s (1.20ns/op)
+  run  5: 0.1200s (1.20ns/op)
+  run  6: 0.1215s (1.22ns/op)
+  run  7: 0.1230s (1.23ns/op)
+  run  8: 0.1232s (1.23ns/op)
+  run  9: 0.1228s (1.23ns/op)
+  run 10: 0.1226s (1.23ns/op)
+Patched (fast path):
+  run  1: 0.0446s (0.45ns/op)
+  run  2: 0.0453s (0.45ns/op)
+  run  3: 0.0451s (0.45ns/op)
+  run  4: 0.0444s (0.44ns/op)
+  run  5: 0.0453s (0.45ns/op)
+  run  6: 0.0442s (0.44ns/op)
+  run  7: 0.0447s (0.45ns/op)
+  run  8: 0.0452s (0.45ns/op)
+  run  9: 0.0448s (0.45ns/op)
+  run 10: 0.0450s (0.45ns/op)
+
+=== Summary ===
+unpatched (slow path)              0.1221     0.1223     0.0026       1.22
+patched (fast path)                0.0449     0.0449     0.0004       0.45
+Speedup (median): 2.72x
+
+=== JSON ===
+{
+  "issue": "LOCAL-PERF-002",
+  "revision": "3ca168b80ae6d7b25fe55784dde3ad24faff7be2",
+  "patch": "families/regex-translate-cache/baseline/implementation.patch",
+  "iterations_per_run": 100000000,
+  "warmup_runs": 5, "measured_runs": 10,
+  "slow_path": {"samples": [0.119541, 0.119969, 0.120877, 0.120989, 0.121530, 0.122594, 0.122777, 0.123007, 0.123168, 0.128758], "median": 0.122062, "mean": 0.122321, "stdev": 0.002596, "units": "seconds"},
+  "fast_path": {"samples": [0.044202, 0.044405, 0.044616, 0.044740, 0.044767, 0.045006, 0.045088, 0.045216, 0.045277, 0.045288], "median": 0.044886, "mean": 0.044860, "stdev": 0.000377, "units": "seconds"},
+  "speedup_median": 2.7194
+}
