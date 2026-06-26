@@ -12,6 +12,12 @@ with substantial LLM assistance (Claude Code, claude-sonnet-4-6).** See
 for or suitable for upstream submission. See upstream policy in PROVENANCE.md.
 
 ---
+This repository is retained as a public, timestamped, explicitly LLM-assisted research artifact. It is sufficient for its intended purpose: demonstrating that a categorical policy against LLM-assisted contributions can exclude concrete patches, tests, benchmarks, and conventional alternative designs.
+
+It is not a campaign against Emacs maintainers, not a claim over the underlying ideas, and not an attempt to prevent or delay independent development. No additional upstream-facing action is planned.
+::: 
+
+
 
 ## Important Disclosures
 
