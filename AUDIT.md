@@ -1,5 +1,6 @@
 # Audit Log
-<!-- LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25 -->
+<!-- LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-25
+     Updated: 2026-06-26 — exact base commit confirmed; combined-cache patch corrected -->
 
 This document records every extraction, correction, and reconstruction decision
 made when converting the original patch set into clean, family-isolated baselines.
@@ -8,7 +9,23 @@ made when converting the original patch set into clean, family-isolated baseline
 
 ## Base Emacs Revision
 
-The patches cannot be attributed to a specific Emacs commit with confidence.
+**Update 2026-06-26:** The exact base commit is now confirmed (see BASELINE.md).
+
+**Confirmed base commit:** `3ca168b80ae6d7b25fe55784dde3ad24faff7be2`
+- Date: 2026-06-23
+- Message: "Merge from origin/emacs-31"
+- Branch: Emacs master (Emacs 31 development, post emacs-31.0.90)
+- Nearest tag: emacs-31.0.90 + 350 commits
+
+**Correction to original estimate:** The earlier estimate of "Emacs 29.x or early 30"
+was incorrect. The actual base is Emacs 31 development code from June 2026.
+
+**All five baseline patches verified** with `git apply --check` against this commit.
+
+---
+
+**Original note (superseded):** The patches could not be attributed to a specific
+Emacs commit with confidence.
 
 **Known blob hashes (base sides of diffs):**
 
@@ -141,8 +158,36 @@ for this content.
 
 ---
 
+---
+
+## Additional Correction: regex-combined-cache Baseline (2026-06-26)
+
+The `families/regex-combined-cache/baseline/implementation.patch` (reconstructed
+from `ascii_caches_combined_0001.patch`) had two formatting errors that prevented
+clean application with `git apply`:
+
+1. **Double bare blank lines:** After `bufp);` in the last hunk of `regex-emacs.c`,
+   the patch had two consecutive bare newlines (no leading space). A unified diff
+   context line must have a leading space; bare newlines are invalid hunk content.
+
+2. **Wrong hunk line count:** The `@@ -5348,6 +5377,41 @@` header claimed 41 new
+   lines, but the actual hunk content had 40 lines (6 context + 34 added).
+
+**Fix applied (2026-06-26):** The patch was regenerated from a clean combined
+state by:
+1. Applying `regex-translate-cache/baseline/implementation.patch` to the base
+2. Manually adding `SYNTAX_TRU` macro, struct fields, opcode replacements, and
+   initialization block
+3. Generating a fresh `git diff` from the combined state
+4. Verifying with `git apply --check` (exit 0, confirmed)
+
+The semantics are identical to the original intent; only the formatting was fixed.
+
+---
+
 ## Semantic Review
 
 No semantic alteration was made to any baseline. Reconstructed patches contain
 identical code to the relevant sections of their source files. The only change is
-exclusion of code that did not belong.
+exclusion of code that did not belong, or correction of formatting errors that
+prevented clean application.
