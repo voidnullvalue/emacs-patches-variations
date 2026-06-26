@@ -1,0 +1,38 @@
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-26
+# Human review status: not-reviewed
+
+id: LOCAL-PERF-002
+title: "Repeated char_table_translate calls for ASCII characters in regex case-folding match loops"
+classification: performance-pathology
+source: source-analysis
+upstream_reference: null
+affected_revision: "3ca168b80ae6d7b25fe55784dde3ad24faff7be2"
+nearest_release: "emacs-31.0.90 + 350 commits"
+platforms:
+  - linux
+  - macos
+  - all
+files_involved:
+  - src/regex-emacs.c
+  - src/regex-emacs.h
+reproduction_command: "sh issues/LOCAL-PERF-002/reproduce.sh"
+baseline_status: passed
+candidate_fixes:
+  primary: "families/regex-translate-cache/baseline/implementation.patch"
+  alternative: "families/regex-translate-cache/variants/lazy-bitmap/implementation.patch (SPECIFICATION)"
+regression_test: "issues/LOCAL-PERF-002/tests/test_regression.c"
+benchmark: "issues/LOCAL-PERF-002/benchmarks/bench_translate_overhead.c"
+llm_assisted: true
+llm_system: "Claude Code"
+llm_model: "claude-sonnet-4-6"
+human_review_status: not-reviewed
+apply_status: passed
+build_status: blocked
+test_status: passed
+benchmark_status: passed
+known_limitations:
+  - "Build status blocked: no autoconf or libncurses-dev on this Linux host; git apply --check passes against base commit."
+  - "Benchmark is a standalone C microbenchmark; no full Emacs binary required."
+  - "TRANSLATE_TRU only caches the ASCII 0-255 range; Unicode code points >255 always take char_table_translate."
+  - "CHAR_TO_BYTE_SAFE truncation for codes 128-255 means entries 128-255 may store a different byte than the code point."
+  - "Cache is per-pattern; patterns without a translate table (translate=Qnil) skip initialization."

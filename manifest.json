@@ -3,17 +3,37 @@
   "llm_system": "Claude Code",
   "llm_model": "claude-sonnet-4-6",
   "generated_date": "2026-06-25",
-  "last_updated": "2026-06-25",
+  "last_updated": "2026-06-26",
   "purpose": "Defensive publication and reproducible performance research atlas for Emacs optimizations",
   "base_emacs_revision": {
-    "status": "unknown",
+    "status": "confirmed",
+    "commit": "3ca168b80ae6d7b25fe55784dde3ad24faff7be2",
+    "date": "2026-06-23",
+    "message": "Merge from origin/emacs-31",
+    "nearest_tag": "emacs-31.0.90",
+    "commits_after_tag": 350,
+    "branch": "master (Emacs 31 development)",
     "blob_hashes": {
-      "src/alloc.c": "5fc166dbc2",
-      "src/nsterm.m": "a7f3fc292c",
-      "src/regex-emacs.c": "d8ed8a462a",
-      "src/regex-emacs.h": "bcfff662f7"
+      "src/alloc.c": {
+        "short": "5fc166dbc2",
+        "full": "5fc166dbc24e50a850b0bbf364f9a2f768458a65"
+      },
+      "src/nsterm.m": {
+        "short": "a7f3fc292c",
+        "full": "a7f3fc292c7fd87a067344008b7afad5ddcaa1ad"
+      },
+      "src/regex-emacs.c": {
+        "short": "d8ed8a462a",
+        "full": "d8ed8a462a1a2a9cf5a02f169d1127fa2aa5753b"
+      },
+      "src/regex-emacs.h": {
+        "short": "bcfff662f7",
+        "full": "bcfff662f7b65868ab6098338e8105ae31b5d021"
+      }
     },
-    "contextual_bound": "Emacs 29.x or early 30 pre-release"
+    "apply_verified": true,
+    "apply_date": "2026-06-26",
+    "note": "Original estimate of Emacs-29.x was incorrect; actual base is Emacs 31 development"
   },
   "families": [
     {
@@ -116,8 +136,19 @@
       "rationale": "Cross-family composition demonstrating deferred-work and scoped-lifetime design philosophy"
     }
   ],
+  "issues": [
+    "issues/LOCAL-PERF-001",
+    "issues/LOCAL-PERF-002",
+    "issues/LOCAL-PERF-003",
+    "issues/LOCAL-PERF-004",
+    "issues/LOCAL-PERF-005"
+  ],
   "docs": [
-    "docs/rejected-designs.md"
+    "docs/rejected-designs.md",
+    "docs/testing-methodology.md",
+    "docs/benchmark-methodology.md",
+    "docs/coverage-claims.md",
+    "docs/selection-guide.md"
   ],
   "tests": [
     "tests/ns-color-cache/test_cache_logic.m",
@@ -130,7 +161,16 @@
   ],
   "tools": [
     "tools/verify_patch.sh",
-    "tools/audit_patch_contents.sh"
+    "tools/audit_patch_contents.sh",
+    "tools/find_base_revision.py",
+    "tools/validate_issue_metadata.py",
+    "tools/run_reproduction.py",
+    "tools/apply_candidate.py",
+    "tools/build_candidate.py",
+    "tools/run_issue_tests.py",
+    "tools/run_benchmark.py",
+    "tools/generate_bug_coverage.py",
+    "tools/summarize_results.py"
   ],
   "inventory": {
     "baselines": 5,
@@ -138,6 +178,9 @@
     "variants_round_2": 22,
     "variants_total": 33,
     "compositions": 2,
-    "total_patch_artifacts": 40
+    "total_patch_artifacts": 40,
+    "issues_documented": 5,
+    "issues_level_3_plus": 5,
+    "issues_level_4_plus": 3
   }
 }

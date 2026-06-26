@@ -1,0 +1,94 @@
+name: Validate Patches and Issues
+
+# LLM-assisted: Claude Code (claude-sonnet-4-6), 2026-06-26
+# Validates patch metadata, issue metadata, and standalone tests.
+# Does NOT pretend to validate macOS-only behavior on Linux runners.
+
+on:
+  push:
+    branches: [master, verified-bug-coverage]
+  pull_request:
+    branches: [master]
+
+jobs:
+  validate-metadata:
+    name: Validate metadata files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pyyaml
+      - name: Validate manifest.json
+        run: python3 -c "import json; json.load(open('manifest.json'))" && echo "manifest.json valid"
+      - name: Validate issue metadata
+        run: python3 tools/validate_issue_metadata.py
+
+  validate-patches:
+    name: Validate patch applicability
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install git
+        run: sudo apt-get install -y git
+      - name: Clone Emacs (blobless)
+        run: |
+          git clone --filter=blob:none --no-checkout \
+            https://github.com/emacs-mirror/emacs.git /tmp/emacs-src
+      - name: Create base worktree
+        run: |
+          git -C /tmp/emacs-src worktree add /tmp/emacs-base \
+            3ca168b80ae6d7b25fe55784dde3ad24faff7be2
+      - name: Check all baseline patches apply
+        run: |
+          for family in regex-syntax-cache regex-translate-cache \
+                        regex-combined-cache malloc-pressure-relief \
+                        ns-color-cache; do
+            patch="families/$family/baseline/implementation.patch"
+            echo "Checking: $patch"
+            git -C /tmp/emacs-base apply --check "$patch"
+            echo "  OK: $patch"
+          done
+      - name: Verify base revision blobs
+        run: python3 tools/find_base_revision.py --emacs-dir /tmp/emacs-src
+
+  run-standalone-tests:
+    name: Run standalone C tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run all issue regression tests
+        run: python3 tools/run_issue_tests.py
+      - name: Run existing unit tests
+        run: |
+          cc -O2 -o /tmp/t_syntax tests/regex-syntax-cache/test_syntax_cache.c && /tmp/t_syntax
+          cc -O2 -o /tmp/t_trans  tests/regex-translate-cache/test_translate_cache.c && /tmp/t_trans
+          cc -O2 -o /tmp/t_thresh tests/malloc-pressure-relief/test_threshold_logic.c && /tmp/t_thresh
+
+  run-benchmarks:
+    name: Run standalone benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run benchmarks
+        run: python3 tools/run_benchmark.py --warmup 2 --runs 3
+
+  check-coverage-report:
+    name: Verify BUG_COVERAGE.md is up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pyyaml
+      - name: Regenerate and diff coverage report
+        run: |
+          python3 tools/generate_bug_coverage.py --output /tmp/coverage_generated.md
+          if ! diff -q BUG_COVERAGE.md /tmp/coverage_generated.md >/dev/null 2>&1; then
+            echo "WARNING: BUG_COVERAGE.md is out of date. Run tools/generate_bug_coverage.py."
+            diff BUG_COVERAGE.md /tmp/coverage_generated.md || true
+          else
+            echo "BUG_COVERAGE.md is up to date."
+          fi

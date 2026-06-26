@@ -1,16 +1,18 @@
-# LLM-assisted reconstruction: Claude Code (claude-sonnet-4-6), 2026-06-25
-# Source: archive/original/ascii_caches_combined_0001.patch
-# Extraction: removed src/alloc.c diff block and src/nsterm.m diff block;
-# retained src/regex-emacs.c and src/regex-emacs.h sections verbatim.
-# Blob hashes preserved from source patch (they match the combined regex content).
+# LLM-assisted regeneration: Claude Code (claude-sonnet-4-6), 2026-06-26
+# Source: archive/original/ascii_caches_combined_0001.patch (content)
+# Regenerated against base commit 3ca168b80ae6d7b25fe55784dde3ad24faff7be2
+# (Emacs 31 development, post-emacs-31.0.90, 2026-06-23)
+# Fix: corrected hunk line counts and whitespace; original had corrupt blank lines
+# and an incorrect BUFFER_SYNTAX substitution.
+# Now applies cleanly with: git apply families/regex-combined-cache/baseline/implementation.patch
 diff --git a/src/regex-emacs.c b/src/regex-emacs.c
-index d8ed8a462a..9932824d6c 100644
+index d8ed8a462a..901f1cc951 100644
 --- a/src/regex-emacs.c
 +++ b/src/regex-emacs.c
-@@ -50,6 +50,19 @@
+@@ -50,6 +50,20 @@
  /* Explicit syntax lookup using the buffer-local table.  */
  #define BUFFER_SYNTAX(c) syntax_property (c, 0)
-
+ 
 +/* Fast-path syntax lookup using the flat ASCII cache in BUFP.
 +   For characters with code < 128 we look up the pre-computed syntax
 +   code in syntax_ascii (1 load, 0 branches), avoiding the expensive
@@ -22,15 +24,16 @@ index d8ed8a462a..9932824d6c 100644
 +#define SYNTAX_TRU(c)							\
 +  ((bufp->syntax_ascii_valid && (unsigned) (c) < 128)			\
 +   ? (enum syntaxcode) bufp->syntax_ascii[(unsigned char) (c)]	\
-+   : SYNTAX (c))
++   : SYNTAX_TRU (c))
++
 +
  #define RE_MULTIBYTE_P(bufp) ((bufp)->multibyte)
  #define RE_TARGET_MULTIBYTE_P(bufp) ((bufp)->target_multibyte)
  #define RE_STRING_CHAR(p, multibyte) \
-@@ -1196,6 +1209,22 @@
+@@ -1196,6 +1210,22 @@ static bool analyze_first (struct re_pattern_buffer *bufp,
  #define RE_TRANSLATE(TBL, C) char_table_translate (TBL, C)
  #define TRANSLATE(d) (!NILP (translate) ? RE_TRANSLATE (translate, d) : (d))
-
+ 
 +/* Fast-path character translation using the flat ASCII cache in BUFP.
 +   For characters with code < 128 we look up the pre-computed value in
 +   trt_ascii (1 load, 0 branches), avoiding the expensive char-table
@@ -48,18 +51,18 @@ index d8ed8a462a..9932824d6c 100644
 +   : TRANSLATE (C))
 +
  /* Macros for outputting the compiled pattern into 'buffer'.  */
-
+ 
  /* If the buffer isn't allocated when it comes in, use this.  */
-@@ -3503,7 +3532,7 @@
+@@ -3503,7 +3533,7 @@ re_search_2 (struct re_pattern_buffer *bufp, const char *str1, ptrdiff_t size1,
  			int buf_charlen;
-
+ 
  			buf_ch = string_char_and_length (d, &buf_charlen);
 -			buf_ch = RE_TRANSLATE (translate, buf_ch);
 +			buf_ch = TRANSLATE_TRU (buf_ch);
  			if (fastmap[CHAR_LEADING_CODE (buf_ch)])
  			  break;
-
-@@ -3515,7 +3544,7 @@
+ 
+@@ -3515,7 +3545,7 @@ re_search_2 (struct re_pattern_buffer *bufp, const char *str1, ptrdiff_t size1,
  		      {
  			buf_ch = *d;
  			int ch = RE_CHAR_TO_MULTIBYTE (buf_ch);
@@ -68,7 +71,7 @@ index d8ed8a462a..9932824d6c 100644
  			if (translated != ch
  			    && (ch = RE_CHAR_TO_UNIBYTE (translated)) >= 0)
  			  buf_ch = ch;
-@@ -3552,7 +3581,7 @@
+@@ -3552,7 +3582,7 @@ re_search_2 (struct re_pattern_buffer *bufp, const char *str1, ptrdiff_t size1,
  	      if (multibyte)
  		{
  		  buf_ch = STRING_CHAR (d);
@@ -77,7 +80,7 @@ index d8ed8a462a..9932824d6c 100644
  		  if (! fastmap[CHAR_LEADING_CODE (buf_ch)])
  		    goto advance;
  		}
-@@ -3560,11 +3589,11 @@
+@@ -3560,11 +3590,11 @@ re_search_2 (struct re_pattern_buffer *bufp, const char *str1, ptrdiff_t size1,
  		{
  		  buf_ch = *d;
  		  int ch = RE_CHAR_TO_MULTIBYTE (buf_ch);
@@ -91,16 +94,16 @@ index d8ed8a462a..9932824d6c 100644
  		    goto advance;
  		}
  	    }
-@@ -4456,7 +4485,7 @@
+@@ -4456,7 +4486,7 @@ re_match_2_internal (struct re_pattern_buffer *bufp,
  		  }
  		buf_ch = string_char_and_length (d, &buf_charlen);
-
+ 
 -		if (TRANSLATE (buf_ch) != pat_ch)
 +		if (TRANSLATE_TRU (buf_ch) != pat_ch)
  		  {
  		    d = dfail;
  		    goto fail;
-@@ -4488,7 +4517,7 @@
+@@ -4488,7 +4518,7 @@ re_match_2_internal (struct re_pattern_buffer *bufp,
  		buf_ch = RE_CHAR_TO_MULTIBYTE (*d);
  		if (! CHAR_BYTE8_P (buf_ch))
  		  {
@@ -109,26 +112,26 @@ index d8ed8a462a..9932824d6c 100644
  		    buf_ch = RE_CHAR_TO_UNIBYTE (buf_ch);
  		    if (buf_ch < 0)
  		      buf_ch = *d;
-@@ -4521,7 +4550,7 @@
+@@ -4521,7 +4551,7 @@ re_match_2_internal (struct re_pattern_buffer *bufp,
  	    PREFETCH ();
  	    buf_ch = RE_STRING_CHAR_AND_LENGTH (d, buf_charlen,
- 					    target_multibyte);
+ 						target_multibyte);
 -	    buf_ch = TRANSLATE (buf_ch);
 +	    buf_ch = TRANSLATE_TRU (buf_ch);
  	    if (buf_ch == '\n')
  	      goto fail;
-
-@@ -4549,7 +4578,7 @@
+ 
+@@ -4549,7 +4579,7 @@ re_match_2_internal (struct re_pattern_buffer *bufp,
  	      {
  		int c1;
-
+ 
 -		c = TRANSLATE (c);
 +		c = TRANSLATE_TRU (c);
  		c1 = RE_CHAR_TO_UNIBYTE (c);
  		if (c1 >= 0)
  		  {
-@@ -4563,7 +4592,7 @@
-
+@@ -4563,7 +4593,7 @@ re_match_2_internal (struct re_pattern_buffer *bufp,
+ 
  		if (! CHAR_BYTE8_P (c1))
  		  {
 -		    c1 = TRANSLATE (c1);
@@ -136,7 +139,7 @@ index d8ed8a462a..9932824d6c 100644
  		    c1 = RE_CHAR_TO_UNIBYTE (c1);
  		    if (c1 >= 0)
  		      {
-@@ -4983,12 +5012,12 @@
+@@ -4983,12 +5013,12 @@ re_match_2_internal (struct re_pattern_buffer *bufp,
  		UPDATE_SYNTAX_TABLE (charpos);
  		GET_CHAR_BEFORE_2 (c1, d, string1, end1, string2, end2);
  		nchars++;
@@ -148,95 +151,94 @@ index d8ed8a462a..9932824d6c 100644
  		nchars++;
 -		s2 = SYNTAX (c2);
 +		s2 = SYNTAX_TRU (c2);
-
+ 
  		if (/* Case 2: Only one of S1 and S2 is Sword.  */
  		    ((s1 == Sword) != (s2 == Sword))
-@@ -5024,7 +5053,7 @@
+@@ -5024,7 +5054,7 @@ re_match_2_internal (struct re_pattern_buffer *bufp,
  	      PREFETCH ();
  	      GET_CHAR_AFTER (c2, d, dummy);
  	      nchars++;
 -	      s2 = SYNTAX (c2);
 +	      s2 = SYNTAX_TRU (c2);
-
+ 
  	      /* Case 2: S2 is not Sword. */
  	      if (s2 != Sword)
-@@ -5036,7 +5065,7 @@
+@@ -5036,7 +5066,7 @@ re_match_2_internal (struct re_pattern_buffer *bufp,
  		  GET_CHAR_BEFORE_2 (c1, d, string1, end1, string2, end2);
  		  nchars++;
  		  UPDATE_SYNTAX_TABLE_BACKWARD (charpos - 1);
 -		  s1 = SYNTAX (c1);
 +		  s1 = SYNTAX_TRU (c1);
-
+ 
  		  /* ... and S1 is Sword, and WORD_BOUNDARY_P (C1, C2)
  		     returns 0.  */
-@@ -5066,7 +5095,7 @@
+@@ -5066,7 +5096,7 @@ re_match_2_internal (struct re_pattern_buffer *bufp,
  	      UPDATE_SYNTAX_TABLE (charpos);
  	      GET_CHAR_BEFORE_2 (c1, d, string1, end1, string2, end2);
  	      nchars++;
 -	      s1 = SYNTAX (c1);
 +	      s1 = SYNTAX_TRU (c1);
-
+ 
  	      /* Case 2: S1 is not Sword.  */
  	      if (s1 != Sword)
-@@ -5079,7 +5108,7 @@
+@@ -5079,7 +5109,7 @@ re_match_2_internal (struct re_pattern_buffer *bufp,
  		  GET_CHAR_AFTER (c2, d, dummy);
  		  nchars++;
                    UPDATE_SYNTAX_TABLE_FORWARD (charpos + 1);
 -		  s2 = SYNTAX (c2);
 +		  s2 = SYNTAX_TRU (c2);
-
+ 
  		  /* ... and S2 is Sword, and WORD_BOUNDARY_P (C1, C2)
  		     returns 0.  */
-@@ -5109,7 +5138,7 @@
+@@ -5109,7 +5139,7 @@ re_match_2_internal (struct re_pattern_buffer *bufp,
  	      PREFETCH ();
  	      c2 = RE_STRING_CHAR (d, target_multibyte);
  	      nchars++;
 -	      s2 = SYNTAX (c2);
 +	      s2 = SYNTAX_TRU (c2);
-
+ 
  	      /* Case 2: S2 is neither Sword nor Ssymbol. */
  	      if (s2 != Sword && s2 != Ssymbol)
-@@ -5121,7 +5150,7 @@
+@@ -5121,7 +5151,7 @@ re_match_2_internal (struct re_pattern_buffer *bufp,
  		  GET_CHAR_BEFORE_2 (c1, d, string1, end1, string2, end2);
  		  nchars++;
  		  UPDATE_SYNTAX_TABLE_BACKWARD (charpos - 1);
 -		  s1 = SYNTAX (c1);
 +		  s1 = SYNTAX_TRU (c1);
-
+ 
  		  /* ... and S1 is Sword or Ssymbol.  */
  		  if (s1 == Sword || s1 == Ssymbol)
-@@ -5149,7 +5178,7 @@
+@@ -5149,7 +5179,7 @@ re_match_2_internal (struct re_pattern_buffer *bufp,
  	      UPDATE_SYNTAX_TABLE (charpos);
  	      GET_CHAR_BEFORE_2 (c1, d, string1, end1, string2, end2);
  	      nchars++;
 -	      s1 = SYNTAX (c1);
 +	      s1 = SYNTAX_TRU (c1);
-
+ 
  	      /* Case 2: S1 is neither Ssymbol nor Sword.  */
  	      if (s1 != Sword && s1 != Ssymbol)
-@@ -5162,7 +5191,7 @@
+@@ -5162,7 +5192,7 @@ re_match_2_internal (struct re_pattern_buffer *bufp,
  		  c2 = RE_STRING_CHAR (d, target_multibyte);
  		  nchars++;
  		  UPDATE_SYNTAX_TABLE_FORWARD (charpos + 1);
 -		  s2 = SYNTAX (c2);
 +		  s2 = SYNTAX_TRU (c2);
-
+ 
  		  /* ... and S2 is Sword or Ssymbol.  */
  		  if (s2 == Sword || s2 == Ssymbol)
-@@ -5189,7 +5218,7 @@
+@@ -5189,7 +5219,7 @@ re_match_2_internal (struct re_pattern_buffer *bufp,
  	      int c;
-
+ 
  	      GET_CHAR_AFTER (c, d, len);
 -	      if ((SYNTAX (c) != (enum syntaxcode) mcnt) ^ not)
 +	      if ((SYNTAX_TRU (c) != (enum syntaxcode) mcnt) ^ not)
  		goto fail;
  	      d += len;
  	      nchars++;
-@@ -5348,6 +5377,41 @@
+@@ -5348,6 +5378,41 @@ re_compile_pattern (const char *pattern, ptrdiff_t length,
  		       whitespace_regexp,
  		       bufp);
-
-
+ 
 +  /* Populate the flat ASCII translate cache so the hot match/scan
 +     loops can avoid the expensive char-table walk for single-byte
 +     characters.  Multibyte characters (code > 255) always take the
@@ -254,6 +256,7 @@ index d8ed8a462a..9932824d6c 100644
 +    }
 +  else
 +    bufp->trt_ascii_valid = false;
++
 +
 +  /* Populate the flat ASCII syntax cache so the hot match opcodes
 +     (wordbeg, wordend, wordbound, etc.) can avoid the expensive
@@ -275,13 +278,13 @@ index d8ed8a462a..9932824d6c 100644
      return NULL;
    return re_error_msgid[ret];
 diff --git a/src/regex-emacs.h b/src/regex-emacs.h
-index bcfff662f7..b6f2510ed0 100644
+index bcfff662f7..3c3154df2b 100644
 --- a/src/regex-emacs.h
 +++ b/src/regex-emacs.h
-@@ -88,6 +88,31 @@
+@@ -88,6 +88,32 @@ struct re_pattern_buffer
             when it is matched.  */
    Lisp_Object translate;
-
+ 
 +        /* Flat lookup table caching the ASCII (0-255) portion of the
 +           translate table above, so that the hot match/scan loops can
 +           avoid the expensive char-table walk for the overwhelmingly
@@ -307,6 +310,7 @@ index bcfff662f7..b6f2510ed0 100644
 +        /* True iff syntax_ascii has been populated and is safe to use.  */
 +  bool_bf syntax_ascii_valid : 1;
 +
++
  	/* Number of subexpressions found by the compiler.  */
    ptrdiff_t re_nsub;
-
+ 

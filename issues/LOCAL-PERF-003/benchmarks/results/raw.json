@@ -1,0 +1,10 @@
+{
+  "issue": "LOCAL-PERF-003",
+  "revision": "3ca168b80ae6d7b25fe55784dde3ad24faff7be2",
+  "patch": "families/regex-combined-cache/baseline/implementation.patch",
+  "iterations_per_run": 100000000,
+  "warmup_runs": 5, "measured_runs": 10,
+  "slow_path": {"samples": [0.239041, 0.239598, 0.239894, 0.242440, 0.242703, 0.243477, 0.244307, 0.247016, 0.250737, 0.254272], "median": 0.243090, "mean": 0.244349, "stdev": 0.004990, "units": "seconds"},
+  "fast_path": {"samples": [0.088516, 0.088811, 0.089565, 0.090662, 0.090998, 0.091222, 0.091273, 0.092322, 0.093401, 0.094940], "median": 0.091110, "mean": 0.091171, "stdev": 0.002000, "units": "seconds"},
+  "speedup_median": 2.6681
+}

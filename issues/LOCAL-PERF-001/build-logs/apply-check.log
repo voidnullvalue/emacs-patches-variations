@@ -1,0 +1,9 @@
+# git apply --check log for LOCAL-PERF-001
+# Date: 2026-06-26
+# Base commit: 3ca168b80ae6d7b25fe55784dde3ad24faff7be2
+# Patch: families/regex-syntax-cache/baseline/implementation.patch
+# Command: git -C /tmp/emacs-src-worktree apply --check --verbose families/regex-syntax-cache/baseline/implementation.patch
+# Exit code: 0
+
+Checking patch src/regex-emacs.c...
+Checking patch src/regex-emacs.h...

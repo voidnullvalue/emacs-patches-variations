@@ -1,0 +1,27 @@
+{
+  "issue": "LOCAL-PERF-001",
+  "revision": "3ca168b80ae6d7b25fe55784dde3ad24faff7be2",
+  "patch": "families/regex-syntax-cache/baseline/implementation.patch",
+  "machine": "see uname -sr",
+  "os": "Linux",
+  "compiler": "cc (see cc --version)",
+  "configure_flags": ["standalone-C-benchmark"],
+  "iterations_per_run": 100000000,
+  "warmup_runs": 5,
+  "measured_runs": 10,
+  "slow_path": {
+    "samples": [0.120686, 0.122683, 0.122800, 0.122906, 0.122978, 0.123655, 0.124338, 0.124487, 0.124510, 0.125166],
+    "median": 0.123316,
+    "mean": 0.123421,
+    "stdev": 0.001297,
+    "units": "seconds"
+  },
+  "fast_path": {
+    "samples": [0.060114, 0.060213, 0.061562, 0.061597, 0.061694, 0.061852, 0.061871, 0.062162, 0.068375, 0.071900],
+    "median": 0.061773,
+    "mean": 0.063134,
+    "stdev": 0.003845,
+    "units": "seconds"
+  },
+  "speedup_median": 1.9963
+}
